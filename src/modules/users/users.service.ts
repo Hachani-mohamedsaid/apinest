@@ -31,5 +31,35 @@ export class UsersService {
   async remove(id: string): Promise<UserDocument | null> {
     return this.userModel.findByIdAndDelete(id).exec();
   }
+
+  async findByResetToken(token: string): Promise<UserDocument | null> {
+    return this.userModel.findOne({
+      resetPasswordToken: token,
+      resetPasswordExpires: { $gt: new Date() }, // Token non expiré
+    }).exec();
+  }
+
+  async updatePassword(id: string, hashedPassword: string): Promise<UserDocument | null> {
+    return this.userModel.findByIdAndUpdate(
+      id,
+      {
+        password: hashedPassword,
+        resetPasswordToken: undefined,
+        resetPasswordExpires: undefined,
+      },
+      { new: true }
+    ).exec();
+  }
+
+  async setResetToken(email: string, token: string | undefined, expires: Date | undefined): Promise<UserDocument | null> {
+    return this.userModel.findOneAndUpdate(
+      { email },
+      {
+        resetPasswordToken: token,
+        resetPasswordExpires: expires,
+      },
+      { new: true }
+    ).exec();
+  }
 }
 

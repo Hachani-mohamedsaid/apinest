@@ -1,15 +1,44 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
+import * as nodemailer from 'nodemailer';
 
 @Injectable()
 export class MailService {
-  constructor(private configService: ConfigService) {}
+  private readonly logger = new Logger(MailService.name);
+  private transporter: nodemailer.Transporter;
+
+  constructor(private configService: ConfigService) {
+    // Configuration Gmail SMTP
+    this.transporter = nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: this.configService.get<string>('GMAIL_USER'),
+        pass: this.configService.get<string>('GMAIL_APP_PASSWORD'), // Utiliser un App Password
+      },
+    });
+  }
 
   async sendEmail(to: string, subject: string, text: string, html?: string): Promise<void> {
-    // TODO: Implémenter l'envoi d'email
-    // Pour l'instant, on simule l'envoi
-    console.log(`Email envoyé à ${to}: ${subject}`);
-    console.log(`Contenu: ${text}`);
+    try {
+      const mailOptions = {
+        from: this.configService.get<string>('GMAIL_USER'),
+        to,
+        subject,
+        text,
+        html: html || text,
+      };
+
+      const info = await this.transporter.sendMail(mailOptions);
+      this.logger.log(`Email sent successfully to ${to}: ${info.messageId}`);
+    } catch (error) {
+      this.logger.error(`Failed to send email to ${to}: ${error.message}`);
+      // En développement, on log quand même
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`[DEV] Email envoyé à ${to}: ${subject}`);
+        console.log(`[DEV] Contenu: ${text}`);
+      }
+      throw error;
+    }
   }
 
   async sendVerificationEmail(to: string, token: string): Promise<void> {

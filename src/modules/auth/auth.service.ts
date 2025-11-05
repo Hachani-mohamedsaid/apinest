@@ -1,15 +1,20 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, BadRequestException, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
+import { MailService } from '../mail/mail.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
+import { ForgotPasswordDto } from './dto/forgot-password.dto';
+import { ResetPasswordDto } from './dto/reset-password.dto';
 import * as bcrypt from 'bcrypt';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class AuthService {
   constructor(
     private usersService: UsersService,
     private jwtService: JwtService,
+    private mailService: MailService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -55,6 +60,52 @@ export class AuthService {
     const userObj = user.toObject();
     const { password, ...result } = userObj;
     return result;
+  }
+
+  async forgotPassword(forgotPasswordDto: ForgotPasswordDto): Promise<{ message: string }> {
+    const user = await this.usersService.findByEmail(forgotPasswordDto.email);
+    
+    // Pour la sécurité, on ne révèle pas si l'email existe ou non
+    if (!user) {
+      // On retourne le même message dans tous les cas pour éviter l'énumération d'emails
+      return { message: 'If the email exists, a password reset link has been sent.' };
+    }
+
+    // Générer un token de réinitialisation
+    const resetToken = crypto.randomBytes(32).toString('hex');
+    const resetTokenExpires = new Date();
+    resetTokenExpires.setHours(resetTokenExpires.getHours() + 1); // Expire dans 1 heure
+
+    // Sauvegarder le token dans la base de données
+    await this.usersService.setResetToken(user.email, resetToken, resetTokenExpires);
+
+    // Envoyer l'email de réinitialisation
+    try {
+      await this.mailService.sendPasswordResetEmail(user.email, resetToken);
+    } catch (error) {
+      // Si l'envoi d'email échoue, on supprime le token pour éviter des problèmes
+      await this.usersService.setResetToken(user.email, undefined, undefined);
+      throw new BadRequestException('Failed to send reset email. Please try again later.');
+    }
+
+    return { message: 'If the email exists, a password reset link has been sent.' };
+  }
+
+  async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<{ message: string }> {
+    // Trouver l'utilisateur avec le token valide
+    const user = await this.usersService.findByResetToken(resetPasswordDto.token);
+    
+    if (!user) {
+      throw new BadRequestException('Invalid or expired reset token');
+    }
+
+    // Hasher le nouveau mot de passe
+    const hashedPassword = await bcrypt.hash(resetPasswordDto.password, 10);
+
+    // Mettre à jour le mot de passe et supprimer le token
+    await this.usersService.updatePassword(user._id.toString(), hashedPassword);
+
+    return { message: 'Password has been reset successfully' };
   }
 }
 
