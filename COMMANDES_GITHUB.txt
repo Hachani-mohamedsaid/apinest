@@ -1,0 +1,15 @@
+REM Remplacez Hachani-mohamedsaid par votre nom d'utilisateur GitHub
+REM et fitness-api par le nom de votre repository
+
+REM 1. Ajouter le remote GitHub
+git remote add origin https://github.com/Hachani-mohamedsaid/fitness-api.git
+
+REM 2. Renommer la branche en "main" (optionnel, mais recommandé)
+git branch -M main
+
+REM 3. Pousser le code sur GitHub
+git push -u origin main
+
+REM Si vous voulez garder "master" au lieu de "main", utilisez :
+REM git push -u origin master
+
