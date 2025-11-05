@@ -1,69 +1,67 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import * as nodemailer from 'nodemailer';
+import * as sgMail from '@sendgrid/mail';
 
 @Injectable()
 export class MailService {
   private readonly logger = new Logger(MailService.name);
-  private transporter: nodemailer.Transporter;
 
   constructor(private configService: ConfigService) {
-    const gmailUser = this.configService.get<string>('GMAIL_USER');
-    const gmailPassword = this.configService.get<string>('GMAIL_APP_PASSWORD');
+    const sendGridApiKey = this.configService.get<string>('SENDGRID_API_KEY');
+    const fromEmail = this.configService.get<string>('SENDGRID_FROM_EMAIL') || 
+                      this.configService.get<string>('GMAIL_USER') || 
+                      'noreply@fitness-api.com';
 
-    // Vérifier que les variables sont configurées
-    if (!gmailUser || !gmailPassword) {
-      this.logger.warn('⚠️ Gmail credentials not configured. Email sending will fail.');
-      this.logger.warn('Please set GMAIL_USER and GMAIL_APP_PASSWORD environment variables.');
+    // Vérifier que SendGrid est configuré
+    if (!sendGridApiKey) {
+      this.logger.warn('⚠️ SendGrid API key not configured. Email sending will fail.');
+      this.logger.warn('Please set SENDGRID_API_KEY environment variable.');
+      this.logger.warn('Falling back to Gmail SMTP (may have timeout issues on Railway)...');
+    } else {
+      // Configuration SendGrid
+      sgMail.setApiKey(sendGridApiKey);
+      this.logger.log('✅ SendGrid configured successfully');
     }
-
-    // Configuration Gmail SMTP avec options de timeout et port explicite
-    this.transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 587,
-      secure: false, // true pour 465, false pour les autres ports
-      auth: {
-        user: gmailUser,
-        pass: gmailPassword?.replace(/\s/g, ''), // Enlever les espaces de l'App Password
-      },
-      tls: {
-        rejectUnauthorized: false, // Pour Railway qui peut avoir des problèmes de certificat
-      },
-      connectionTimeout: 10000, // 10 secondes
-      greetingTimeout: 10000,
-      socketTimeout: 10000,
-    });
   }
 
   async sendEmail(to: string, subject: string, text: string, html?: string): Promise<void> {
-    try {
-      const mailOptions = {
-        from: this.configService.get<string>('GMAIL_USER'),
-        to,
-        subject,
-        text,
-        html: html || text,
-      };
+    const sendGridApiKey = this.configService.get<string>('SENDGRID_API_KEY');
+    const fromEmail = this.configService.get<string>('SENDGRID_FROM_EMAIL') || 
+                      this.configService.get<string>('GMAIL_USER') || 
+                      'noreply@fitness-api.com';
 
-      const info = await this.transporter.sendMail(mailOptions);
-      this.logger.log(`✅ Email sent successfully to ${to}: ${info.messageId}`);
-    } catch (error: any) {
-      this.logger.error(`❌ Failed to send email to ${to}`);
-      this.logger.error(`Error: ${error.message}`);
-      if (error.code) {
-        this.logger.error(`Error code: ${error.code}`);
+    // Utiliser SendGrid si configuré
+    if (sendGridApiKey) {
+      try {
+        const msg = {
+          to,
+          from: fromEmail,
+          subject,
+          text,
+          html: html || text,
+        };
+
+        await sgMail.send(msg);
+        this.logger.log(`✅ Email sent successfully via SendGrid to ${to}`);
+        return;
+      } catch (error: any) {
+        this.logger.error(`❌ Failed to send email via SendGrid to ${to}`);
+        this.logger.error(`Error: ${error.message}`);
+        if (error.response?.body) {
+          this.logger.error(`Error details: ${JSON.stringify(error.response.body)}`);
+        }
+        throw error;
       }
-      if (error.response) {
-        this.logger.error(`Error response: ${JSON.stringify(error.response)}`);
-      }
-      
-      // En développement, on log quand même
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`[DEV] Email envoyé à ${to}: ${subject}`);
-        console.log(`[DEV] Contenu: ${text}`);
-      }
-      throw error;
     }
+
+    // Fallback: En développement, on log seulement
+    if (process.env.NODE_ENV !== 'production') {
+      this.logger.warn(`[DEV] Email envoyé à ${to}: ${subject}`);
+      this.logger.warn(`[DEV] Contenu: ${text}`);
+      return;
+    }
+
+    throw new Error('Email service not configured. Please set SENDGRID_API_KEY or GMAIL credentials.');
   }
 
   async sendVerificationEmail(to: string, token: string): Promise<void> {
