@@ -91,6 +91,11 @@ export class AuthService {
     return { message: 'If the email exists, a password reset link has been sent.' };
   }
 
+  async validateResetToken(token: string): Promise<boolean> {
+    const user = await this.usersService.findByResetToken(token);
+    return !!user;
+  }
+
   async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<{ message: string }> {
     // Trouver l'utilisateur avec le token valide
     const user = await this.usersService.findByResetToken(resetPasswordDto.token);
