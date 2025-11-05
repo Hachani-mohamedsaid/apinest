@@ -1,6 +1,8 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import * as sgMail from '@sendgrid/mail';
+import { getPasswordResetEmailTemplate } from './templates/password-reset.template';
+import { getVerificationEmailTemplate } from './templates/verification.template';
 
 @Injectable()
 export class MailService {
@@ -65,22 +67,28 @@ export class MailService {
   }
 
   async sendVerificationEmail(to: string, token: string): Promise<void> {
-    const verificationUrl = `${process.env.APP_URL || 'http://localhost:3000'}/auth/verify-email?token=${token}`;
+    const appUrl = this.configService.get<string>('APP_URL') || 'http://localhost:3000';
+    const verificationUrl = `${appUrl}/auth/verify-email?token=${token}`;
+    const { text, html } = getVerificationEmailTemplate(verificationUrl);
+    
     await this.sendEmail(
       to,
-      'Vérifiez votre email',
-      `Cliquez sur ce lien pour vérifier votre email: ${verificationUrl}`,
-      `<a href="${verificationUrl}">Vérifier mon email</a>`,
+      'Vérifiez votre email - Fitness API',
+      text,
+      html,
     );
   }
 
   async sendPasswordResetEmail(to: string, token: string): Promise<void> {
-    const resetUrl = `${process.env.APP_URL || 'http://localhost:3000'}/auth/reset-password?token=${token}`;
+    const appUrl = this.configService.get<string>('APP_URL') || 'http://localhost:3000';
+    const resetUrl = `${appUrl}/auth/reset-password?token=${token}`;
+    const { text, html } = getPasswordResetEmailTemplate(resetUrl);
+    
     await this.sendEmail(
       to,
-      'Réinitialisation de mot de passe',
-      `Cliquez sur ce lien pour réinitialiser votre mot de passe: ${resetUrl}`,
-      `<a href="${resetUrl}">Réinitialiser mon mot de passe</a>`,
+      'Réinitialisation de mot de passe - Fitness API',
+      text,
+      html,
     );
   }
 }
