@@ -35,7 +35,10 @@ lerna-debug.log*
 !.vscode/extensions.json
 
 # Environment variables
-
+.env
+.env.local
+.env.*.local
+*.env
 
 # macOS metadata
 ._*
