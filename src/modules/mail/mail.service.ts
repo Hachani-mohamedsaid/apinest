@@ -17,13 +17,21 @@ export class MailService {
       this.logger.warn('Please set GMAIL_USER and GMAIL_APP_PASSWORD environment variables.');
     }
 
-    // Configuration Gmail SMTP
+    // Configuration Gmail SMTP avec options de timeout et port explicite
     this.transporter = nodemailer.createTransport({
-      service: 'gmail',
+      host: 'smtp.gmail.com',
+      port: 587,
+      secure: false, // true pour 465, false pour les autres ports
       auth: {
         user: gmailUser,
         pass: gmailPassword?.replace(/\s/g, ''), // Enlever les espaces de l'App Password
       },
+      tls: {
+        rejectUnauthorized: false, // Pour Railway qui peut avoir des problèmes de certificat
+      },
+      connectionTimeout: 10000, // 10 secondes
+      greetingTimeout: 10000,
+      socketTimeout: 10000,
     });
   }
 
