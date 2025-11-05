@@ -12,7 +12,7 @@ async function bootstrap() {
     transform: true,
   }));
 
-  // Active CORS si nécessaire
+  // Active CORS si nécessaire hello
   app.enableCors();
 
   const port = process.env.PORT || 3000;
