@@ -147,22 +147,20 @@ export class UsersService {
       throw new BadRequestException('Invalid image type. Please upload a valid image file.');
     }
 
-    const apiKey =
-      this.configService.get<string>('IMGBB_API_KEY') ||
-      process.env.IMGBB_API_KEY ||
-      '70ffd8bdc8481496e5d9166d18617bda';
+    const apiKey = (this.configService.get<string>('IMGBB_API_KEY') || process.env.IMGBB_API_KEY || '').trim();
 
     if (!apiKey) {
       this.logger.error('IMGBB_API_KEY is not configured in the environment');
       throw new InternalServerErrorException('Image upload service is not configured');
     }
 
+    this.logger.debug(`Using imgbb key (first 4 chars): ${apiKey.slice(0, 4)}***`);
+
+    const base64Image = file.buffer.toString('base64');
+
     const formData = new FormData();
     formData.append('key', apiKey);
-    formData.append('image', file.buffer, {
-      filename: file.originalname || `profile-${Date.now()}`,
-      contentType: file.mimetype,
-    });
+    formData.append('image', base64Image);
 
     try {
       const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
