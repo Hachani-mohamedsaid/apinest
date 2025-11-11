@@ -52,6 +52,13 @@ SENDGRID_API_KEY=...                 # ou configurez un autre transport mail
 SENDGRID_FROM_EMAIL=...              # adresse d'expédition
 ```
 
+## Vérification d'email
+
+- Lorsqu'un utilisateur met à jour son adresse email dans la page de profil, un nouveau lien de vérification est automatiquement envoyé et `isEmailVerified` repasse à `false`.
+- Le lien reçu pointe vers `GET /auth/verify-email?token=...` qui confirme l'adresse et remet `isEmailVerified` à `true`.
+- Pour envoyer (ou renvoyer) manuellement un email de confirmation, utilisez `POST /auth/send-verification-email` avec `{ "email": "user@email.com" }`.
+- La connexion (`POST /auth/login`) reste possible même si l'email n'est pas vérifié ; exploitez `isEmailVerified` côté front pour afficher les avertissements nécessaires.
+
 ## Exécution de l'application
 
 ### Mode développement
@@ -61,13 +68,6 @@ npm run start:dev
 ```
 
 L'application sera accessible sur `http://localhost:3000` (ou le port configuré dans `.env`)
-
-## Vérification d'email
-
-- À l'inscription, un email de confirmation est envoyé avec un lien de validation.
-- L'utilisateur doit cliquer sur `GET /auth/verify-email?token=...` pour activer son compte.
-- Pour renvoyer un email de vérification, utiliser `POST /auth/send-verification-email` avec `{ "email": "user@email.com" }`.
-- Tant que `isEmailVerified` est `false`, la connexion (`POST /auth/login`) refuse l'accès.
 
 ### Mode production
 

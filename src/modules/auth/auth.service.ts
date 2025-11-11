@@ -38,9 +38,6 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Invalid email or password');
     }
-    if (!user.isEmailVerified) {
-      throw new UnauthorizedException('Email not verified. Please verify your email to continue.');
-    }
     const payload = { email: user.email, sub: user._id };
     return {
       access_token: this.jwtService.sign(payload),
@@ -66,21 +63,9 @@ export class AuthService {
       location: registerDto.location,
     });
     
-    const verificationToken = crypto.randomBytes(32).toString('hex');
-    await this.usersService.setEmailVerificationToken(user._id.toString(), verificationToken);
-
-    try {
-      await this.mailService.sendVerificationEmail(user.email, verificationToken);
-    } catch (error) {
-      throw new BadRequestException('Failed to send verification email. Please try again later.');
-    }
-
     const userObj = user.toObject();
     const { password, ...result } = userObj;
-    return {
-      message: 'Registration successful. Please check your inbox to verify your email before logging in.',
-      user: result,
-    };
+    return result;
   }
 
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto): Promise<{ message: string }> {

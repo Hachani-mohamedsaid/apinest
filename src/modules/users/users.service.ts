@@ -7,6 +7,8 @@ import { URLSearchParams } from 'url';
 import { Express } from 'express';
 import { User, UserDocument } from './schemas/user.schema';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { MailService } from '../mail/mail.service';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class UsersService {
@@ -15,6 +17,7 @@ export class UsersService {
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     private readonly configService: ConfigService,
+    private readonly mailService: MailService,
   ) {}
 
   async create(createUserDto: any): Promise<UserDocument> {
@@ -35,13 +38,40 @@ export class UsersService {
   }
 
   async update(id: string, updateUserDto: UpdateProfileDto): Promise<UserDocument | null> {
-    const payload: Partial<UpdateProfileDto> = { ...updateUserDto };
+    const currentUser = await this.userModel.findById(id).exec();
+
+    if (!currentUser) {
+      return null;
+    }
+
+    const payload: Partial<UpdateProfileDto & { emailVerificationToken?: string; isEmailVerified?: boolean }> = {
+      ...updateUserDto,
+    };
 
     if (Array.isArray(updateUserDto?.sportsInterests)) {
       payload.sportsInterests = updateUserDto.sportsInterests.filter((interest) => !!interest?.trim());
     }
 
-    return this.userModel.findByIdAndUpdate(id, payload, { new: true }).exec();
+    let verificationToken: string | undefined;
+
+    if (updateUserDto.email && updateUserDto.email !== currentUser.email) {
+      verificationToken = crypto.randomBytes(32).toString('hex');
+      payload.emailVerificationToken = verificationToken;
+      payload.isEmailVerified = false;
+    }
+
+    const updatedUser = await this.userModel.findByIdAndUpdate(id, payload, { new: true }).exec();
+
+    if (updatedUser && verificationToken) {
+      try {
+        await this.mailService.sendVerificationEmail(updatedUser.email, verificationToken);
+      } catch (error) {
+        this.logger.error(`Failed to send verification email to ${updatedUser.email}`, error instanceof Error ? error.stack : undefined);
+        throw new InternalServerErrorException('Failed to send verification email. Please try again later.');
+      }
+    }
+
+    return updatedUser;
   }
 
   async remove(id: string): Promise<UserDocument | null> {
