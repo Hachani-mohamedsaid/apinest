@@ -4,7 +4,7 @@ Vérification de votre email
 
 Bonjour,
 
-Merci de vous être inscrit à Fitness API !
+Merci de vous être inscrit à Nexo !
 
 Pour activer votre compte, veuillez vérifier votre adresse email en cliquant sur le lien ci-dessous :
 ${verificationUrl}

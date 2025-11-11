@@ -5,22 +5,36 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 
+@ApiTags('auth')
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('login')
+  @ApiOperation({ summary: 'Connecter un utilisateur existant' })
+  @ApiBody({ type: LoginDto })
+  @ApiResponse({ status: 200, description: 'Authentification réussie' })
+  @ApiResponse({ status: 401, description: 'Identifiants invalides' })
   async login(@Body() loginDto: LoginDto) {
     return this.authService.login(loginDto);
   }
 
   @Post('register')
+  @ApiOperation({ summary: 'Créer un nouvel utilisateur' })
+  @ApiBody({ type: RegisterDto })
+  @ApiResponse({ status: 201, description: 'Inscription réussie' })
+  @ApiResponse({ status: 400, description: 'Requête invalide' })
   async register(@Body() registerDto: RegisterDto) {
     return this.authService.register(registerDto);
   }
 
   @Post('forgot-password')
+  @ApiOperation({ summary: 'Envoyer un email de réinitialisation de mot de passe' })
+  @ApiBody({ type: ForgotPasswordDto })
+  @ApiResponse({ status: 200, description: 'Email de réinitialisation envoyé' })
+  @ApiResponse({ status: 404, description: 'Utilisateur non trouvé' })
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
     return this.authService.forgotPassword(forgotPasswordDto);
   }
@@ -206,6 +220,10 @@ export class AuthController {
   }
 
   @Post('reset-password')
+  @ApiOperation({ summary: 'Réinitialiser le mot de passe via le token reçu' })
+  @ApiBody({ type: ResetPasswordDto })
+  @ApiResponse({ status: 200, description: 'Mot de passe mis à jour' })
+  @ApiResponse({ status: 400, description: 'Token invalide ou expiré' })
   async resetPassword(@Body() resetPasswordDto: ResetPasswordDto) {
     return this.authService.resetPassword(resetPasswordDto);
   }

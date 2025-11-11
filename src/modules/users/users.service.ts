@@ -1,11 +1,21 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import axios from 'axios';
+import { URLSearchParams } from 'url';
+import { Express } from 'express';
 import { User, UserDocument } from './schemas/user.schema';
+import { UpdateProfileDto } from './dto/update-profile.dto';
 
 @Injectable()
 export class UsersService {
-  constructor(@InjectModel(User.name) private userModel: Model<UserDocument>) {}
+  private readonly logger = new Logger(UsersService.name);
+
+  constructor(
+    @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    private readonly configService: ConfigService,
+  ) {}
 
   async create(createUserDto: any): Promise<UserDocument> {
     const createdUser = new this.userModel(createUserDto);
@@ -24,8 +34,14 @@ export class UsersService {
     return this.userModel.findOne({ email }).exec();
   }
 
-  async update(id: string, updateUserDto: any): Promise<UserDocument | null> {
-    return this.userModel.findByIdAndUpdate(id, updateUserDto, { new: true }).exec();
+  async update(id: string, updateUserDto: UpdateProfileDto): Promise<UserDocument | null> {
+    const payload: Partial<UpdateProfileDto> = { ...updateUserDto };
+
+    if (Array.isArray(updateUserDto?.sportsInterests)) {
+      payload.sportsInterests = updateUserDto.sportsInterests.filter((interest) => !!interest?.trim());
+    }
+
+    return this.userModel.findByIdAndUpdate(id, payload, { new: true }).exec();
   }
 
   async remove(id: string): Promise<UserDocument | null> {
@@ -60,6 +76,65 @@ export class UsersService {
       },
       { new: true }
     ).exec();
+  }
+
+  async updateProfileImage(id: string, file: Express.Multer.File): Promise<UserDocument | null> {
+    if (!file) {
+      throw new BadRequestException('Image file is required');
+    }
+
+    if (!file.mimetype?.startsWith('image/')) {
+      throw new BadRequestException('Invalid image type. Please upload a valid image file.');
+    }
+
+    const apiKey = this.configService.get<string>('IMGBB_API_KEY') || process.env.IMGBB_API_KEY;
+
+    if (!apiKey) {
+      this.logger.error('IMGBB_API_KEY is not configured in the environment');
+      throw new InternalServerErrorException('Image upload service is not configured');
+    }
+
+    const base64Image = file.buffer.toString('base64');
+
+    const formBody = new URLSearchParams();
+    formBody.append('key', apiKey);
+    formBody.append('image', base64Image);
+
+    try {
+      const response = await axios.post('https://api.imgbb.com/1/upload', formBody, {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 15000,
+      });
+
+      if (!response.data?.success || !response.data?.data) {
+        this.logger.error(`Unexpected response from imgbb: ${JSON.stringify(response.data)}`);
+        throw new InternalServerErrorException('Failed to upload image. Please try again later.');
+      }
+
+      const imageData = response.data.data;
+
+      return this.userModel
+        .findByIdAndUpdate(
+          id,
+          {
+            profileImageUrl: imageData.url ?? imageData.display_url,
+            profileImageDeleteUrl: imageData.delete_url,
+            profileImageThumbnailUrl: imageData.medium?.url ?? imageData.thumb?.url,
+          },
+          { new: true },
+        )
+        .exec();
+    } catch (error) {
+      if (axios.isAxiosError(error)) {
+        const message =
+          (error.response?.data as { error?: { message?: string } })?.error?.message ?? error.message;
+        this.logger.error(`Failed to upload profile image to imgbb: ${message}`);
+        throw new InternalServerErrorException(`Failed to upload image: ${message}`);
+      }
+
+      this.logger.error('Unexpected error while uploading profile image', (error as Error).stack);
+      throw new InternalServerErrorException('Failed to upload image');
+    }
   }
 }
 

@@ -21,6 +21,27 @@ export class User {
   isEmailVerified?: boolean;
 
   @Prop()
+  phone?: string;
+
+  @Prop()
+  dateOfBirth?: string;
+
+  @Prop()
+  about?: string;
+
+  @Prop({ type: [String], default: [] })
+  sportsInterests?: string[];
+
+  @Prop()
+  profileImageUrl?: string;
+
+  @Prop()
+  profileImageDeleteUrl?: string;
+
+  @Prop()
+  profileImageThumbnailUrl?: string;
+
+  @Prop()
   emailVerificationToken?: string;
 
   @Prop()

@@ -37,6 +37,12 @@ cp .env.example .env
 
 Puis éditez le fichier `.env` avec vos configurations (MongoDB, JWT secret, etc.)
 
+Ajoutez également la clé d'API imgbb pour l'upload des photos de profil :
+
+```
+IMGBB_API_KEY=1597a68393fa53d678379a5971555be3
+```
+
 ## Exécution de l'application
 
 ### Mode développement
