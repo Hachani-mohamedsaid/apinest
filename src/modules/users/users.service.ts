@@ -157,14 +157,15 @@ export class UsersService {
       throw new InternalServerErrorException('Image upload service is not configured');
     }
 
-    const base64Image = file.buffer.toString('base64');
-
     const formData = new FormData();
-    formData.append('image', base64Image);
+    formData.append('key', apiKey);
+    formData.append('image', file.buffer, {
+      filename: file.originalname || `profile-${Date.now()}`,
+      contentType: file.mimetype,
+    });
 
     try {
       const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
-        params: { key: apiKey },
         headers: formData.getHeaders(),
         timeout: 15000,
       });
