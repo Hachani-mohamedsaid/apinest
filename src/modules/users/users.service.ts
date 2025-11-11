@@ -3,12 +3,12 @@ import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import axios from 'axios';
-import { URLSearchParams } from 'url';
 import { Express } from 'express';
 import { User, UserDocument } from './schemas/user.schema';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { MailService } from '../mail/mail.service';
 import * as crypto from 'crypto';
+import FormData from 'form-data';
 
 @Injectable()
 export class UsersService {
@@ -159,13 +159,13 @@ export class UsersService {
 
     const base64Image = file.buffer.toString('base64');
 
-    const formBody = new URLSearchParams();
-    formBody.append('key', apiKey);
-    formBody.append('image', base64Image);
+    const formData = new FormData();
+    formData.append('image', base64Image);
 
     try {
-      const response = await axios.post('https://api.imgbb.com/1/upload', formBody, {
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
+        params: { key: apiKey },
+        headers: formData.getHeaders(),
         timeout: 15000,
       });
 
