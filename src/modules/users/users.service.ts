@@ -1,3 +1,4 @@
+import { URLSearchParams } from 'url';
 import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
@@ -8,7 +9,6 @@ import { User, UserDocument } from './schemas/user.schema';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { MailService } from '../mail/mail.service';
 import * as crypto from 'crypto';
-import * as FormData from 'form-data';
 
 @Injectable()
 export class UsersService {
@@ -156,20 +156,25 @@ export class UsersService {
 
     this.logger.debug(`Using imgbb key (first 4 chars): ${apiKey.slice(0, 4)}***`);
 
-    const formData = new FormData();
-    formData.append('image', file.buffer, {
-      filename: file.originalname || `profile-${Date.now()}`,
-      contentType: file.mimetype,
-    });
+    const base64Image = file.buffer.toString('base64');
+
+    const formBody = new URLSearchParams();
+    formBody.append('image', base64Image);
+    if (file.originalname) {
+      formBody.append('name', file.originalname);
+    }
 
     try {
-      const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
-        params: { key: apiKey },
-        headers: formData.getHeaders(),
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
+      const response = await axios.post(
+        `https://api.imgbb.com/1/upload?key=${encodeURIComponent(apiKey)}`,
+        formBody.toString(),
+        {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+        },
         timeout: 15000,
-      });
+        },
+      );
 
       if (!response.data?.success || !response.data?.data) {
         this.logger.error(`Unexpected response from imgbb: ${JSON.stringify(response.data)}`);
