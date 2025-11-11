@@ -156,15 +156,18 @@ export class UsersService {
 
     this.logger.debug(`Using imgbb key (first 4 chars): ${apiKey.slice(0, 4)}***`);
 
-    const base64Image = file.buffer.toString('base64');
-
     const formData = new FormData();
-    formData.append('key', apiKey);
-    formData.append('image', base64Image);
+    formData.append('image', file.buffer, {
+      filename: file.originalname || `profile-${Date.now()}`,
+      contentType: file.mimetype,
+    });
 
     try {
       const response = await axios.post('https://api.imgbb.com/1/upload', formData, {
+        params: { key: apiKey },
         headers: formData.getHeaders(),
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
         timeout: 15000,
       });
 
