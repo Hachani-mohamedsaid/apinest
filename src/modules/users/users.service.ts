@@ -8,7 +8,7 @@ import { User, UserDocument } from './schemas/user.schema';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { MailService } from '../mail/mail.service';
 import * as crypto from 'crypto';
-import FormData from 'form-data';
+import * as FormData from 'form-data';
 
 @Injectable()
 export class UsersService {
