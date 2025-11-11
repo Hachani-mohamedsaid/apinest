@@ -1,4 +1,9 @@
-import { Injectable, UnauthorizedException, ConflictException, BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  ConflictException,
+  BadRequestException,
+} from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
@@ -6,6 +11,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { SendVerificationEmailDto } from './dto/send-verification-email.dto';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
 
@@ -32,6 +38,9 @@ export class AuthService {
     if (!user) {
       throw new UnauthorizedException('Invalid email or password');
     }
+    if (!user.isEmailVerified) {
+      throw new UnauthorizedException('Email not verified. Please verify your email to continue.');
+    }
     const payload = { email: user.email, sub: user._id };
     return {
       access_token: this.jwtService.sign(payload),
@@ -57,9 +66,21 @@ export class AuthService {
       location: registerDto.location,
     });
     
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    await this.usersService.setEmailVerificationToken(user._id.toString(), verificationToken);
+
+    try {
+      await this.mailService.sendVerificationEmail(user.email, verificationToken);
+    } catch (error) {
+      throw new BadRequestException('Failed to send verification email. Please try again later.');
+    }
+
     const userObj = user.toObject();
     const { password, ...result } = userObj;
-    return result;
+    return {
+      message: 'Registration successful. Please check your inbox to verify your email before logging in.',
+      user: result,
+    };
   }
 
   async forgotPassword(forgotPasswordDto: ForgotPasswordDto): Promise<{ message: string }> {
@@ -111,6 +132,46 @@ export class AuthService {
     await this.usersService.updatePassword(user._id.toString(), hashedPassword);
 
     return { message: 'Password has been reset successfully' };
+  }
+
+  async verifyEmail(token: string): Promise<{ message: string }> {
+    if (!token) {
+      throw new BadRequestException('Verification token is required');
+    }
+
+    const user = await this.usersService.findByVerificationToken(token);
+
+    if (!user) {
+      throw new BadRequestException('Invalid or expired verification token');
+    }
+
+    await this.usersService.markEmailAsVerified(user._id.toString());
+
+    return { message: 'Email verified successfully' };
+  }
+
+  async resendVerificationEmail(sendVerificationEmailDto: SendVerificationEmailDto): Promise<{ message: string }> {
+    const user = await this.usersService.findByEmail(sendVerificationEmailDto.email);
+
+    if (!user) {
+      // ne pas révéler si l'email existe
+      return { message: 'If the email exists, a verification link has been sent.' };
+    }
+
+    if (user.isEmailVerified) {
+      return { message: 'Email is already verified.' };
+    }
+
+    const verificationToken = crypto.randomBytes(32).toString('hex');
+    await this.usersService.setEmailVerificationToken(user._id.toString(), verificationToken);
+
+    try {
+      await this.mailService.sendVerificationEmail(user.email, verificationToken);
+    } catch (error) {
+      throw new BadRequestException('Failed to send verification email. Please try again later.');
+    }
+
+    return { message: 'If the email exists, a verification link has been sent.' };
   }
 }
 

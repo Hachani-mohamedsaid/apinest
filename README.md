@@ -43,6 +43,15 @@ Ajoutez également la clé d'API imgbb pour l'upload des photos de profil :
 IMGBB_API_KEY=1597a68393fa53d678379a5971555be3
 ```
 
+Pour la vérification d'email, assurez-vous de définir :
+
+```
+APP_URL=http://localhost:3000        # URL publique de l'API utilisée dans les liens envoyés par email
+APP_LOGIN_URL=http://localhost:3001  # (optionnel) URL de la page de connexion du front, affichée après vérification
+SENDGRID_API_KEY=...                 # ou configurez un autre transport mail
+SENDGRID_FROM_EMAIL=...              # adresse d'expédition
+```
+
 ## Exécution de l'application
 
 ### Mode développement
@@ -52,6 +61,13 @@ npm run start:dev
 ```
 
 L'application sera accessible sur `http://localhost:3000` (ou le port configuré dans `.env`)
+
+## Vérification d'email
+
+- À l'inscription, un email de confirmation est envoyé avec un lien de validation.
+- L'utilisateur doit cliquer sur `GET /auth/verify-email?token=...` pour activer son compte.
+- Pour renvoyer un email de vérification, utiliser `POST /auth/send-verification-email` avec `{ "email": "user@email.com" }`.
+- Tant que `isEmailVerified` est `false`, la connexion (`POST /auth/login`) refuse l'accès.
 
 ### Mode production
 

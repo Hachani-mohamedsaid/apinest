@@ -5,6 +5,7 @@ import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { SendVerificationEmailDto } from './dto/send-verification-email.dto';
 import { ApiTags, ApiOperation, ApiResponse, ApiBody } from '@nestjs/swagger';
 
 @ApiTags('auth')
@@ -30,6 +31,14 @@ export class AuthController {
     return this.authService.register(registerDto);
   }
 
+  @Post('send-verification-email')
+  @ApiOperation({ summary: 'Renvoyer un email de vérification' })
+  @ApiBody({ type: SendVerificationEmailDto })
+  @ApiResponse({ status: 200, description: 'Email de vérification envoyé (si l’email existe et n’est pas déjà vérifié)' })
+  async resendVerification(@Body() sendVerificationEmailDto: SendVerificationEmailDto) {
+    return this.authService.resendVerificationEmail(sendVerificationEmailDto);
+  }
+
   @Post('forgot-password')
   @ApiOperation({ summary: 'Envoyer un email de réinitialisation de mot de passe' })
   @ApiBody({ type: ForgotPasswordDto })
@@ -37,6 +46,91 @@ export class AuthController {
   @ApiResponse({ status: 404, description: 'Utilisateur non trouvé' })
   async forgotPassword(@Body() forgotPasswordDto: ForgotPasswordDto) {
     return this.authService.forgotPassword(forgotPasswordDto);
+  }
+
+  @Get('verify-email')
+  async verifyEmail(@Query('token') token: string, @Res() res: Response) {
+    if (!token) {
+      return res.status(HttpStatus.BAD_REQUEST).send(`
+        <html>
+          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h1>❌ Token manquant</h1>
+            <p>Le lien de vérification est invalide. Veuillez demander un nouvel email de vérification.</p>
+          </body>
+        </html>
+      `);
+    }
+
+    try {
+      await this.authService.verifyEmail(token);
+    } catch (error) {
+      return res.status(HttpStatus.BAD_REQUEST).send(`
+        <html>
+          <body style="font-family: Arial, sans-serif; text-align: center; padding: 50px;">
+            <h1>❌ Token invalide ou expiré</h1>
+            <p>Ce lien de vérification est invalide ou a expiré. Veuillez demander un nouvel email de vérification.</p>
+          </body>
+        </html>
+      `);
+    }
+
+    return res.send(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Email vérifié</title>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              display: flex;
+              justify-content: center;
+              align-items: center;
+              min-height: 100vh;
+              margin: 0;
+              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            }
+            .container {
+              background: white;
+              padding: 40px;
+              border-radius: 10px;
+              box-shadow: 0 10px 25px rgba(0,0,0,0.2);
+              max-width: 400px;
+              width: 100%;
+              text-align: center;
+            }
+            h1 {
+              color: #333;
+              margin-bottom: 20px;
+            }
+            p {
+              color: #555;
+              margin-bottom: 20px;
+            }
+            a {
+              display: inline-block;
+              padding: 12px 24px;
+              background: #667eea;
+              color: white;
+              border-radius: 5px;
+              text-decoration: none;
+              font-weight: bold;
+            }
+            a:hover {
+              background: #5568d3;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>✅ Email vérifié</h1>
+            <p>Merci d'avoir confirmé votre adresse email. Vous pouvez maintenant vous connecter et profiter de toutes les fonctionnalités.</p>
+            <a href="${process.env.APP_LOGIN_URL || '#'}">Se connecter</a>
+          </div>
+        </body>
+      </html>
+    `);
   }
 
   @Get('reset-password')

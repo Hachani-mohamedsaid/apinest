@@ -78,6 +78,36 @@ export class UsersService {
     ).exec();
   }
 
+  async setEmailVerificationToken(id: string, token: string | undefined): Promise<UserDocument | null> {
+    return this.userModel
+      .findByIdAndUpdate(
+        id,
+        {
+          emailVerificationToken: token,
+          isEmailVerified: token ? false : true,
+        },
+        { new: true },
+      )
+      .exec();
+  }
+
+  async findByVerificationToken(token: string): Promise<UserDocument | null> {
+    return this.userModel.findOne({ emailVerificationToken: token }).exec();
+  }
+
+  async markEmailAsVerified(id: string): Promise<UserDocument | null> {
+    return this.userModel
+      .findByIdAndUpdate(
+        id,
+        {
+          isEmailVerified: true,
+          emailVerificationToken: undefined,
+        },
+        { new: true },
+      )
+      .exec();
+  }
+
   async updateProfileImage(id: string, file: Express.Multer.File): Promise<UserDocument | null> {
     if (!file) {
       throw new BadRequestException('Image file is required');
