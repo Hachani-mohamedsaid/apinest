@@ -58,6 +58,7 @@ SENDGRID_FROM_EMAIL=...              # adresse d'expédition
 - Le lien reçu pointe vers `GET /auth/verify-email?token=...` qui confirme l'adresse et remet `isEmailVerified` à `true`.
 - Pour envoyer (ou renvoyer) manuellement un email de confirmation, utilisez `POST /auth/send-verification-email` avec `{ "email": "user@email.com" }`.
 - La connexion (`POST /auth/login`) reste possible même si l'email n'est pas vérifié ; exploitez `isEmailVerified` côté front pour afficher les avertissements nécessaires.
+- Pour permettre aux utilisateurs connectés de modifier leur mot de passe, utilisez `PATCH /users/:id/change-password` avec un corps JSON `{ "currentPassword": "...", "newPassword": "..." }`. Le mot de passe est vérifié, doit différer de l'actuel et respecter les règles de complexité (8 caractères, maj/min, chiffre, caractère spécial).
 
 ## Exécution de l'application
 

@@ -9,6 +9,7 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
+  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
@@ -16,6 +17,7 @@ import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Express } from 'express';
 import { memoryStorage } from 'multer';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('users')
 export class UsersController {
@@ -55,6 +57,20 @@ export class UsersController {
   )
   updateProfileImage(@Param('id') id: string, @UploadedFile() file: Express.Multer.File) {
     return this.usersService.updateProfileImage(id, file);
+  }
+
+  @Patch(':id/change-password')
+  @UseGuards(JwtAuthGuard)
+  changePassword(
+    @Param('id') id: string,
+    @Body() changePasswordDto: ChangePasswordDto,
+    @Request() req,
+  ) {
+    if (!req.user?._id || req.user._id.toString() !== id) {
+      throw new ForbiddenException('You can only change your own password');
+    }
+
+    return this.usersService.changePassword(id, changePasswordDto.currentPassword, changePasswordDto.newPassword);
   }
 
   @Delete(':id')

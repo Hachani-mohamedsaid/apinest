@@ -1,5 +1,5 @@
 import { URLSearchParams } from 'url';
-import { BadRequestException, Injectable, InternalServerErrorException, Logger } from '@nestjs/common';
+import { BadRequestException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
@@ -9,6 +9,7 @@ import { User, UserDocument } from './schemas/user.schema';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { MailService } from '../mail/mail.service';
 import * as crypto from 'crypto';
+import * as bcrypt from 'bcrypt';
 
 @Injectable()
 export class UsersService {
@@ -137,6 +138,31 @@ export class UsersService {
         { new: true },
       )
       .exec();
+  }
+
+  async changePassword(id: string, currentPassword: string, newPassword: string): Promise<{ message: string }> {
+    const user = await this.userModel.findById(id).exec();
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    const isCurrentValid = await bcrypt.compare(currentPassword, user.password);
+
+    if (!isCurrentValid) {
+      throw new BadRequestException('Current password is incorrect');
+    }
+
+    const isSamePassword = await bcrypt.compare(newPassword, user.password);
+
+    if (isSamePassword) {
+      throw new BadRequestException('New password must be different from the current password');
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await this.updatePassword(id, hashedPassword);
+
+    return { message: 'Password updated successfully' };
   }
 
   async updateProfileImage(id: string, file: Express.Multer.File): Promise<UserDocument | null> {
