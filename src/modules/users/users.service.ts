@@ -147,7 +147,10 @@ export class UsersService {
       throw new BadRequestException('Invalid image type. Please upload a valid image file.');
     }
 
-    const apiKey = this.configService.get<string>('IMGBB_API_KEY') || process.env.IMGBB_API_KEY;
+    const apiKey =
+      this.configService.get<string>('IMGBB_API_KEY') ||
+      process.env.IMGBB_API_KEY ||
+      '70ffd8bdc8481496e5d9166d18617bda';
 
     if (!apiKey) {
       this.logger.error('IMGBB_API_KEY is not configured in the environment');
