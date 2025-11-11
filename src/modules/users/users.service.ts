@@ -108,7 +108,8 @@ export class UsersService {
     ).exec();
   }
 
-  async setEmailVerificationToken(id: string, token: string | undefined): Promise<UserDocument | null> {
+  async setEmailVerificationToken(id: string, token: string | undefined):
+   Promise<UserDocument | null> {
     return this.userModel
       .findByIdAndUpdate(
         id,
@@ -147,7 +148,8 @@ export class UsersService {
       throw new BadRequestException('Invalid image type. Please upload a valid image file.');
     }
 
-    const apiKey = (this.configService.get<string>('IMGBB_API_KEY') || process.env.IMGBB_API_KEY || '').trim();
+    const apiKey =
+      (this.configService.get<string>('IMGBB_API_KEY') || process.env.IMGBB_API_KEY || '5bcfdc535939a696f5a6916a331f90c6').trim();
 
     if (!apiKey) {
       this.logger.error('IMGBB_API_KEY is not configured in the environment');
