@@ -50,6 +50,7 @@ APP_URL=http://localhost:3000        # URL publique de l'API utilisée dans les 
 APP_LOGIN_URL=http://localhost:3001  # (optionnel) URL de la page de connexion du front, affichée après vérification
 SENDGRID_API_KEY=...                 # ou configurez un autre transport mail
 SENDGRID_FROM_EMAIL=...              # adresse d'expédition
+JWT_REMEMBER_ME_EXPIRES_IN=30d       # (optionnel) durée du token quand "remember me" est activé
 ```
 
 ## Vérification d'email
@@ -59,6 +60,7 @@ SENDGRID_FROM_EMAIL=...              # adresse d'expédition
 - Pour envoyer (ou renvoyer) manuellement un email de confirmation, utilisez `POST /auth/send-verification-email` avec `{ "email": "user@email.com" }`.
 - La connexion (`POST /auth/login`) reste possible même si l'email n'est pas vérifié ; exploitez `isEmailVerified` côté front pour afficher les avertissements nécessaires.
 - Pour permettre aux utilisateurs connectés de modifier leur mot de passe, utilisez `PATCH /users/:id/change-password` avec un corps JSON `{ "currentPassword": "...", "newPassword": "..." }`. Le mot de passe est vérifié, doit différer de l'actuel et respecter les règles de complexité (8 caractères, maj/min, chiffre, caractère spécial).
+- Le login accepte un champ optionnel `rememberMe` (`POST /auth/login`). S'il est à `true`, le JWT est émis avec la durée configurée par `JWT_REMEMBER_ME_EXPIRES_IN` (défaut 30 jours) et la réponse inclut `expiresIn`.
 
 ## Exécution de l'application
 

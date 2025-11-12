@@ -14,6 +14,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { SendVerificationEmailDto } from './dto/send-verification-email.dto';
 import * as bcrypt from 'bcrypt';
 import * as crypto from 'crypto';
+import { ConfigService } from '@nestjs/config';
 
 @Injectable()
 export class AuthService {
@@ -21,6 +22,7 @@ export class AuthService {
     private usersService: UsersService,
     private jwtService: JwtService,
     private mailService: MailService,
+    private configService: ConfigService,
   ) {}
 
   async validateUser(email: string, password: string): Promise<any> {
@@ -39,8 +41,14 @@ export class AuthService {
       throw new UnauthorizedException('Invalid email or password');
     }
     const payload = { email: user.email, sub: user._id };
+
+    const defaultExpiresIn = this.configService.get<string>('JWT_EXPIRES_IN') || '7d';
+    const rememberMeExpiresIn = this.configService.get<string>('JWT_REMEMBER_ME_EXPIRES_IN') || '30d';
+    const expiresIn = loginDto.rememberMe ? rememberMeExpiresIn : defaultExpiresIn;
+
     return {
-      access_token: this.jwtService.sign(payload),
+      access_token: this.jwtService.sign(payload, { expiresIn }),
+      expiresIn,
       user,
     };
   }

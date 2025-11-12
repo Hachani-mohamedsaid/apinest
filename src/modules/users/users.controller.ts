@@ -1,15 +1,5 @@
 import {
-  Body,
-  Controller,
-  Delete,
-  Patch,
-  Param,
-  Get,
-  Request,
-  UploadedFile,
-  UseGuards,
-  UseInterceptors,
-  ForbiddenException,
+  Body,Controller,Delete,Patch,Param,Get, Request,UploadedFile,UseGuards, UseInterceptors,  ForbiddenException,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
