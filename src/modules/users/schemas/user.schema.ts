@@ -17,6 +17,12 @@ export class User {
   @Prop({ required: true })
   location: string;
 
+  @Prop()
+  latitude?: number;
+
+  @Prop()
+  longitude?: number;
+
   @Prop({ default: false })
   isEmailVerified?: boolean;
 
