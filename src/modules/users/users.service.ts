@@ -234,5 +234,39 @@ export class UsersService {
       throw new InternalServerErrorException('Failed to upload image');
     }
   }
+
+  /**
+   * Search users by name or email (case-insensitive)
+   * Returns users matching the search query for chat functionality
+   */
+  async searchUsers(query: string, currentUserId?: string): Promise<any[]> {
+    if (!query || query.trim().length < 2) {
+      return [];
+    }
+
+    const searchRegex = new RegExp(query.trim(), 'i');
+    
+    const users = await this.userModel
+      .find({
+        $or: [
+          { name: searchRegex },
+          { email: searchRegex },
+        ],
+      })
+      .select('_id name email profileImageUrl profileImageThumbnailUrl')
+      .limit(20)
+      .exec();
+
+    // Transform to match iOS DTO format (tolerant to id/_id and profileImageUrl/avatar)
+    return users.map((user) => ({
+      id: user._id.toString(),
+      _id: user._id.toString(), // Include both for iOS compatibility
+      name: user.name,
+      email: user.email,
+      profileImageUrl: user.profileImageUrl || user.profileImageThumbnailUrl || null,
+      avatar: user.profileImageUrl || user.profileImageThumbnailUrl || null, // Alias for iOS compatibility
+      profileImageThumbnailUrl: user.profileImageThumbnailUrl || null,
+    }));
+  }
 }
 

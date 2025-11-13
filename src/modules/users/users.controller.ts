@@ -1,5 +1,5 @@
 import {
-  Body,Controller,Delete,Patch,Param,Get, Request,UploadedFile,UseGuards, UseInterceptors,  ForbiddenException,
+  Body,Controller,Delete,Patch,Param,Get, Request,UploadedFile,UseGuards, UseInterceptors,  ForbiddenException, Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
@@ -23,6 +23,12 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   getProfile(@Request() req) {
     return req.user;
+  }
+
+  @Get('search')
+  @UseGuards(JwtAuthGuard)
+  searchUsers(@Query('search') search: string, @Request() req) {
+    return this.usersService.searchUsers(search, req.user?._id?.toString());
   }
 
   @Get(':id')
