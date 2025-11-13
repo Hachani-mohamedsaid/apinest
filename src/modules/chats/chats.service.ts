@@ -19,9 +19,32 @@ export class ChatsService {
   ) {}
 
   /**
+   * Validate if a string is a valid MongoDB ObjectId
+   */
+  private isValidObjectId(id: string): boolean {
+    return Types.ObjectId.isValid(id) && new Types.ObjectId(id).toString() === id;
+  }
+
+  /**
+   * Validate ObjectId and throw BadRequestException if invalid
+   */
+  private validateObjectId(id: string, fieldName: string = 'ID'): void {
+    if (!this.isValidObjectId(id)) {
+      throw new BadRequestException(`Invalid ${fieldName}: ${id}. Must be a valid MongoDB ObjectId.`);
+    }
+  }
+
+  /**
    * Create a new chat (1-on-1 or group)
    */
   async create(createChatDto: CreateChatDto, userId: string): Promise<ChatDocument> {
+    this.validateObjectId(userId, 'User ID');
+    
+    // Validate all participant IDs
+    createChatDto.participantIds.forEach((id) => {
+      this.validateObjectId(id, 'Participant ID');
+    });
+    
     const participantIds = [
       ...new Set([userId, ...createChatDto.participantIds]),
     ].map((id) => new Types.ObjectId(id));
@@ -67,6 +90,8 @@ export class ChatsService {
    * Get all chats for a user with populated data
    */
   async findAll(userId: string, searchQuery?: string): Promise<any[]> {
+    this.validateObjectId(userId, 'User ID');
+    
     const userObjectId = new Types.ObjectId(userId);
 
     const chats = await this.chatModel
@@ -140,6 +165,9 @@ export class ChatsService {
    * Get a specific chat by ID
    */
   async findOne(chatId: string, userId: string): Promise<ChatDocument> {
+    this.validateObjectId(chatId, 'Chat ID');
+    this.validateObjectId(userId, 'User ID');
+
     const chat = await this.chatModel
       .findById(chatId)
       .populate('participants', 'name email profileImageUrl')
@@ -166,6 +194,9 @@ export class ChatsService {
    * Get all messages for a chat
    */
   async getMessages(chatId: string, userId: string): Promise<any[]> {
+    this.validateObjectId(chatId, 'Chat ID');
+    this.validateObjectId(userId, 'User ID');
+    
     // Verify user has access to chat
     await this.findOne(chatId, userId);
 
@@ -200,6 +231,9 @@ export class ChatsService {
     sendMessageDto: SendMessageDto,
     userId: string,
   ): Promise<MessageDocument> {
+    this.validateObjectId(chatId, 'Chat ID');
+    this.validateObjectId(userId, 'User ID');
+    
     // Verify user has access to chat
     const chat = await this.findOne(chatId, userId);
 
@@ -233,6 +267,9 @@ export class ChatsService {
    * Mark chat as read (reset unread count)
    */
   async markChatAsRead(chatId: string, userId: string): Promise<ChatDocument> {
+    this.validateObjectId(chatId, 'Chat ID');
+    this.validateObjectId(userId, 'User ID');
+    
     const chat = await this.findOne(chatId, userId);
 
     // Reset unread count
@@ -256,6 +293,9 @@ export class ChatsService {
    * Delete a chat
    */
   async remove(chatId: string, userId: string): Promise<void> {
+    this.validateObjectId(chatId, 'Chat ID');
+    this.validateObjectId(userId, 'User ID');
+    
     const chat = await this.findOne(chatId, userId);
 
     // For group chats, only allow deletion by participants (could add admin check later)
@@ -267,6 +307,9 @@ export class ChatsService {
    * Delete a message (soft delete)
    */
   async deleteMessage(messageId: string, userId: string): Promise<void> {
+    this.validateObjectId(messageId, 'Message ID');
+    this.validateObjectId(userId, 'User ID');
+    
     const message = await this.messageModel.findById(messageId).exec();
 
     if (!message) {
