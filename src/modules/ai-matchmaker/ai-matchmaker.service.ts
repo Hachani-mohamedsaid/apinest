@@ -76,13 +76,33 @@ export class AIMatchmakerService {
     } catch (error) {
       console.error('Error in AI Matchmaker chat:', error);
       if (error.response) {
+        const statusCode = error.response.status || HttpStatus.INTERNAL_SERVER_ERROR;
+        const errorMessage = error.response.data?.error?.message || error.message;
+        
+        // Gestion spéciale pour le quota dépassé (429)
+        if (statusCode === 429) {
+          throw new HttpException(
+            {
+              statusCode: 429,
+              message: 'Quota API OpenAI dépassé. Le service AI est temporairement indisponible. Veuillez réessayer plus tard ou contacter l\'administrateur.',
+            },
+            HttpStatus.TOO_MANY_REQUESTS,
+          );
+        }
+        
         throw new HttpException(
-          `OpenAI API Error: ${error.response.data?.error?.message || error.message}`,
-          error.response.status || HttpStatus.INTERNAL_SERVER_ERROR,
+          {
+            statusCode: statusCode,
+            message: `OpenAI API Error: ${errorMessage}`,
+          },
+          statusCode,
         );
       }
       throw new HttpException(
-        'Erreur lors de la communication avec l\'IA',
+        {
+          statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
+          message: 'Erreur lors de la communication avec l\'IA',
+        },
         HttpStatus.INTERNAL_SERVER_ERROR,
       );
     }
@@ -99,25 +119,30 @@ export class AIMatchmakerService {
 
     context += `\n\nVoici les activités disponibles dans l'application:\n`;
     activities.forEach((activity, index) => {
+      const activityId = activity._id.toString();
       const dateStr = activity.date instanceof Date 
         ? activity.date.toLocaleDateString('fr-FR') 
-        : activity.date;
+        : String(activity.date);
       const timeStr = activity.time instanceof Date 
         ? activity.time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-        : activity.time;
+        : String(activity.time);
       
-      context += `${index + 1}. ${activity.title} (${activity.sportType}) - ${activity.location} - ${dateStr} ${timeStr} - Niveau: ${activity.level} - Participants: ${activity.participants}\n`;
+      context += `${index + 1}. ID: ${activityId} - ${activity.title} (${activity.sportType}) - ${activity.location} - ${dateStr} ${timeStr} - Niveau: ${activity.level} - Participants: ${activity.participants}/${activity.participants || 10}\n`;
     });
 
     context += `\n\nVoici les utilisateurs disponibles:\n`;
     users.forEach((u, index) => {
-      context += `${index + 1}. ${u.name} - ${u.location || 'Localisation inconnue'} - Sports: ${u.sportsInterests?.join(', ') || 'Non spécifiés'}\n`;
+      const userId = u._id.toString();
+      context += `${index + 1}. ID: ${userId} - ${u.name} - ${u.location || 'Localisation inconnue'} - Sports: ${u.sportsInterests?.join(', ') || 'Non spécifiés'}\n`;
     });
 
-    context += `\n\nQuand l'utilisateur demande des activités ou des partenaires, suggère des activités et utilisateurs de la liste ci-dessus qui correspondent à sa demande. `;
-    context += `Réponds en français de manière amicale et utile. `;
-    context += `Si tu suggères des activités, utilise les IDs réels des activités. `;
-    context += `Si tu suggères des utilisateurs, utilise les IDs réels des utilisateurs.`;
+    context += `\n\nIMPORTANT - Instructions pour les réponses:\n`;
+    context += `1. Réponds en français de manière amicale et utile.\n`;
+    context += `2. Quand tu suggères des activités, mentionne explicitement le titre de l'activité ET son ID dans ta réponse.\n`;
+    context += `3. Quand tu suggères des utilisateurs, mentionne explicitement le nom de l'utilisateur ET son ID dans ta réponse.\n`;
+    context += `4. Si l'utilisateur demande "trouver un partenaire de course", suggère des utilisateurs qui aiment la course à pied.\n`;
+    context += `5. Si l'utilisateur demande des activités de groupe, suggère des activités avec plusieurs participants.\n`;
+    context += `6. Sois spécifique et mentionne les détails (lieu, date, niveau) des activités suggérées.\n`;
 
     return context;
   }
@@ -159,54 +184,125 @@ export class AIMatchmakerService {
     const suggestedUsers: SuggestedUserDto[] = [];
     const options: string[] = [];
 
-    // Chercher des références aux activités dans la réponse
+    // Chercher des références aux activités dans la réponse par ID ou titre
     activities.forEach(activity => {
-      if (aiResponse.toLowerCase().includes(activity.title.toLowerCase()) ||
-          aiResponse.toLowerCase().includes(activity.sportType.toLowerCase())) {
-        const dateStr = activity.date instanceof Date 
-          ? activity.date.toLocaleDateString('fr-FR') 
-          : String(activity.date);
-        const timeStr = activity.time instanceof Date 
-          ? activity.time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-          : String(activity.time);
+      const activityId = activity._id.toString();
+      const titleLower = activity.title.toLowerCase();
+      const sportTypeLower = activity.sportType.toLowerCase();
+      const responseLower = aiResponse.toLowerCase();
+      
+      // Vérifier si l'ID ou le titre est mentionné dans la réponse
+      if (aiResponse.includes(activityId) || 
+          responseLower.includes(titleLower) ||
+          (responseLower.includes(sportTypeLower) && responseLower.includes(activity.location.toLowerCase()))) {
+        // Éviter les doublons
+        if (!suggestedActivities.find(a => a.id === activityId)) {
+          const dateStr = activity.date instanceof Date 
+            ? activity.date.toLocaleDateString('fr-FR') 
+            : String(activity.date);
+          const timeStr = activity.time instanceof Date 
+            ? activity.time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+            : String(activity.time);
 
-        suggestedActivities.push({
-          id: activity._id.toString(),
-          title: activity.title,
-          sportType: activity.sportType,
-          location: activity.location,
-          date: dateStr,
-          time: timeStr,
-          participants: activity.participants || 0,
-          maxParticipants: 10, // Default max participants since schema doesn't have separate field
-          level: activity.level,
-          matchScore: 85 + Math.floor(Math.random() * 15), // Score entre 85 et 100
-        });
+          suggestedActivities.push({
+            id: activityId,
+            title: activity.title,
+            sportType: activity.sportType,
+            location: activity.location,
+            date: dateStr,
+            time: timeStr,
+            participants: activity.participants || 0,
+            maxParticipants: activity.participants || 10,
+            level: activity.level,
+            matchScore: 85 + Math.floor(Math.random() * 15), // Score entre 85 et 100
+          });
+        }
       }
     });
 
-    // Chercher des références aux utilisateurs dans la réponse
+    // Chercher des références aux utilisateurs dans la réponse par ID ou nom
     users.forEach(user => {
-      if (aiResponse.toLowerCase().includes(user.name.toLowerCase())) {
-        suggestedUsers.push({
-          id: user._id.toString(),
-          name: user.name,
-          profileImageUrl: user.profileImageUrl,
-          sport: user.sportsInterests?.[0] || 'Sport',
-          distance: 'Proche',
-          matchScore: 80 + Math.floor(Math.random() * 20),
-          bio: user.about,
-          availability: 'Disponible',
-        });
+      const userId = user._id.toString();
+      const nameLower = user.name.toLowerCase();
+      const responseLower = aiResponse.toLowerCase();
+      
+      // Vérifier si l'ID ou le nom est mentionné dans la réponse
+      if (aiResponse.includes(userId) || 
+          responseLower.includes(nameLower)) {
+        // Éviter les doublons
+        if (!suggestedUsers.find(u => u.id === userId)) {
+          suggestedUsers.push({
+            id: userId,
+            name: user.name,
+            profileImageUrl: user.profileImageUrl,
+            sport: user.sportsInterests?.[0] || 'Sport',
+            distance: 'Proche',
+            matchScore: 80 + Math.floor(Math.random() * 20),
+            bio: user.about,
+            availability: 'Disponible',
+          });
+        }
       }
     });
+
+    // Si aucune suggestion n'a été trouvée mais que l'utilisateur demande des activités/partenaires,
+    // suggérer les meilleures correspondances basées sur les sports préférés
+    if (suggestedActivities.length === 0 && suggestedUsers.length === 0) {
+      const responseLower = aiResponse.toLowerCase();
+      
+      // Si la demande concerne des activités
+      if (responseLower.includes('activité') || responseLower.includes('activite') || 
+          responseLower.includes('groupe') || responseLower.includes('rejoindre')) {
+        // Prendre les 3 premières activités disponibles
+        activities.slice(0, 3).forEach(activity => {
+          const dateStr = activity.date instanceof Date 
+            ? activity.date.toLocaleDateString('fr-FR') 
+            : String(activity.date);
+          const timeStr = activity.time instanceof Date 
+            ? activity.time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+            : String(activity.time);
+
+          suggestedActivities.push({
+            id: activity._id.toString(),
+            title: activity.title,
+            sportType: activity.sportType,
+            location: activity.location,
+            date: dateStr,
+            time: timeStr,
+            participants: activity.participants || 0,
+            maxParticipants: activity.participants || 10,
+            level: activity.level,
+            matchScore: 80 + Math.floor(Math.random() * 15),
+          });
+        });
+      }
+      
+      // Si la demande concerne des partenaires
+      if (responseLower.includes('partenaire') || responseLower.includes('course') || 
+          responseLower.includes('running') || responseLower.includes('coureur')) {
+        // Prendre les 3 premiers utilisateurs disponibles
+        users.slice(0, 3).forEach(user => {
+          suggestedUsers.push({
+            id: user._id.toString(),
+            name: user.name,
+            profileImageUrl: user.profileImageUrl,
+            sport: user.sportsInterests?.[0] || 'Sport',
+            distance: 'Proche',
+            matchScore: 75 + Math.floor(Math.random() * 20),
+            bio: user.about,
+            availability: 'Disponible',
+          });
+        });
+      }
+    }
 
     // Extraire les options de la réponse (si l'IA suggère des actions)
     if (aiResponse.includes('?')) {
       const sentences = aiResponse.split(/[.!?]/);
       sentences.forEach(sentence => {
-        if (sentence.trim().length > 10 && sentence.trim().length < 50) {
-          options.push(sentence.trim());
+        const trimmed = sentence.trim();
+        if (trimmed.length > 10 && trimmed.length < 50 && !trimmed.includes('ID:')) {
+          options.push(trimmed);
         }
       });
       // Limiter à 3 options
