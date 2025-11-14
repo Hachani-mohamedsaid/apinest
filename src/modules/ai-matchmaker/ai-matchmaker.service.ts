@@ -11,6 +11,7 @@ import { Activity, ActivityDocument } from '../activities/schemas/activity.schem
 @Injectable()
 export class AIMatchmakerService {
   private readonly openaiApiKey: string;
+  private readonly openaiModel: string;
   private readonly openaiApiUrl = 'https://api.openai.com/v1/chat/completions';
 
   constructor(
@@ -22,6 +23,9 @@ export class AIMatchmakerService {
     if (!this.openaiApiKey) {
       throw new Error('OPENAI_API_KEY environment variable is required');
     }
+    // Modèle par défaut: gpt-3.5-turbo (accessible pour tous)
+    // Alternatives: gpt-4o, gpt-4-turbo, gpt-4o-mini
+    this.openaiModel = this.configService.get<string>('OPENAI_MODEL') || 'gpt-3.5-turbo';
   }
 
   async chat(userId: string, chatRequest: ChatRequestDto): Promise<ChatResponseDto> {
@@ -50,7 +54,7 @@ export class AIMatchmakerService {
       const response = await axios.post(
         this.openaiApiUrl,
         {
-          model: 'gpt-4',
+          model: this.openaiModel,
           messages: messages,
           temperature: 0.7,
           max_tokens: 1000,
