@@ -28,6 +28,8 @@ export class ActivitiesService {
     };
 
     const createdActivity = new this.activityModel(activityData);
+    // Le créateur est automatiquement ajouté aux participants
+    createdActivity.participantIds = [userId as any];
     return createdActivity.save();
   }
 
@@ -151,6 +153,115 @@ export class ActivitiesService {
     } catch (error) {
       throw new BadRequestException('Invalid date or time format');
     }
+  }
+
+  async joinActivity(activityId: string, userId: string) {
+    const activity = await this.activityModel.findById(activityId).exec();
+    if (!activity) {
+      throw new NotFoundException('Activity not found');
+    }
+
+    // Vérifier si l'utilisateur est déjà participant
+    const isAlreadyParticipant = activity.participantIds.some(
+      (p: any) => p.toString() === userId,
+    );
+    if (isAlreadyParticipant) {
+      throw new BadRequestException('Already joined this activity');
+    }
+
+    // Vérifier si l'activité est complète
+    if (activity.isCompleted) {
+      throw new BadRequestException('Activity is already completed');
+    }
+
+    // Vérifier si l'activité est pleine
+    if (activity.participantIds.length >= activity.participants) {
+      throw new BadRequestException('Activity is full');
+    }
+
+    // Ajouter l'utilisateur aux participants
+    activity.participantIds.push(userId as any);
+    await activity.save();
+
+    const updatedActivity = await this.activityModel
+      .findById(activityId)
+      .populate('creator', 'name email profileImageUrl')
+      .populate('participantIds', 'name email profileImageUrl')
+      .exec();
+
+    return {
+      message: 'Successfully joined activity',
+      activity: updatedActivity,
+    };
+  }
+
+  async getParticipants(activityId: string) {
+    const activity = await this.activityModel
+      .findById(activityId)
+      .populate('participantIds', 'name profileImageUrl')
+      .populate('creator', 'name profileImageUrl')
+      .exec();
+
+    if (!activity) {
+      throw new NotFoundException('Activity not found');
+    }
+
+    const creatorId = activity.creator.toString();
+    const participants = activity.participantIds.map((participant: any) => ({
+      _id: participant._id,
+      name: participant.name,
+      profileImageUrl: participant.profileImageUrl,
+      isHost: participant._id.toString() === creatorId,
+      joinedAt: (activity as any).createdAt || new Date(), // Utiliser createdAt comme approximation
+    }));
+
+    return { participants };
+  }
+
+  async leaveActivity(activityId: string, userId: string) {
+    const activity = await this.activityModel.findById(activityId).exec();
+    if (!activity) {
+      throw new NotFoundException('Activity not found');
+    }
+
+    // Vérifier si l'utilisateur est le créateur
+    if (activity.creator.toString() === userId) {
+      throw new BadRequestException('Host cannot leave the activity');
+    }
+
+    // Vérifier si l'utilisateur est participant
+    const isParticipant = activity.participantIds.some(
+      (p: any) => p.toString() === userId,
+    );
+    if (!isParticipant) {
+      throw new BadRequestException('You are not a participant of this activity');
+    }
+
+    // Retirer l'utilisateur des participants
+    activity.participantIds = activity.participantIds.filter(
+      (p: any) => p.toString() !== userId,
+    );
+    await activity.save();
+
+    return { message: 'Successfully left activity' };
+  }
+
+  async completeActivity(activityId: string, userId: string) {
+    const activity = await this.activityModel.findById(activityId).exec();
+    if (!activity) {
+      throw new NotFoundException('Activity not found');
+    }
+
+    // Vérifier si l'utilisateur est le créateur
+    if (activity.creator.toString() !== userId) {
+      throw new ForbiddenException('Only the host can mark activity as complete');
+    }
+
+    // Marquer l'activité comme complétée
+    activity.isCompleted = true;
+    await activity.save();
+
+    return { message: 'Activity marked as complete' };
   }
 }
 

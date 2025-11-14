@@ -33,13 +33,19 @@ export class Activity {
   time: Date;
 
   @Prop({ required: true, min: 1, max: 100, default: 5 })
-  participants: number;
+  participants: number; // Maximum number of participants
+
+  @Prop({ type: [{ type: Types.ObjectId, ref: 'User' }], default: [] })
+  participantIds: Types.ObjectId[]; // List of user IDs who joined
 
   @Prop({ required: true, enum: ['Beginner', 'Intermediate', 'Advanced'] })
   level: string;
 
   @Prop({ required: true, enum: ['public', 'friends'], default: 'public' })
   visibility: string;
+
+  @Prop({ default: false })
+  isCompleted?: boolean;
 }
 
 export const ActivitySchema = SchemaFactory.createForClass(Activity);

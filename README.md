@@ -134,10 +134,13 @@ Get-ChildItem -Recurse -Filter "._*" | Remove-Item -Force
 
 ## Documentation supplémentaire
 
+- **WebSocket Activity Room** : Voir [WEBSOCKET_ACTIVITY_ROOM_GUIDE.md](./WEBSOCKET_ACTIVITY_ROOM_GUIDE.md) pour les messages en temps réel (optionnel)
+- **Intégration Android - Activity Room WebSocket** : Voir [ANDROID_ACTIVITY_ROOM_WEBSOCKET_GUIDE.md](./ANDROID_ACTIVITY_ROOM_WEBSOCKET_GUIDE.md) pour intégrer WebSocket dans Android (Jetpack Compose + Kotlin)
+- **API Activity Room** : Voir [ACTIVITY_ROOM_API_GUIDE.md](./ACTIVITY_ROOM_API_GUIDE.md) pour les endpoints REST
 - **Intégration Android - AI Matchmaker** : Voir [ANDROID_AI_MATCHMAKER_API_GUIDE.md](./ANDROID_AI_MATCHMAKER_API_GUIDE.md) pour intégrer l'AI Matchmaker dans votre app Android (Jetpack Compose + Kotlin)
 - **Intégration Android - Chat** : Voir [ANDROID_CHAT_API_GUIDE.md](./ANDROID_CHAT_API_GUIDE.md) pour intégrer le système de chat
 - **Intégration Android - Activités** : Voir [ANDROID_ACTIVITY_API_GUIDE.md](./ANDROID_ACTIVITY_API_GUIDE.md) pour intégrer les activités
-- **Gestion du quota OpenAI** : Voir [OPENAI_QUOTA_MANAGEMENT.md](./OPENAI_QUOTA_MANAGEMENT.md) pour gérer les erreurs 429 et optimiser les coûts...
+- **Gestion du quota OpenAI** : Voir [OPENAI_QUOTA_MANAGEMENT.md](./OPENAI_QUOTA_MANAGEMENT.md) pour gérer les erreurs 429, vérifier les limites (RPM, RPD, TPM) et optimiser les coûts
 - **Configuration MongoDB** : Voir [CONFIG_MONGODB.md](./CONFIG_MONGODB.md)
 - **Configuration Railway** : Voir [RAILWAY_MONGODB_SETUP.md](./RAILWAY_MONGODB_SETUP.md)
 - **Configuration Email** : Voir [SENDGRID_SETUP.md](./SENDGRID_SETUP.md) ou [GMAIL_SMTP_SETUP.md](./GMAIL_SMTP_SETUP.md)
