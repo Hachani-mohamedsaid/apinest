@@ -7,6 +7,7 @@ import { MailModule } from './modules/mail/mail.module';
 import { ActivitiesModule } from './modules/activities/activities.module';
 import { ChatsModule } from './modules/chats/chats.module';
 import { QuickMatchModule } from './modules/quick-match/quick-match.module';
+import { AIMatchmakerModule } from './modules/ai-matchmaker/ai-matchmaker.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -39,6 +40,7 @@ import { HealthController } from './health.controller';
     ActivitiesModule,
     ChatsModule,
     QuickMatchModule,
+    AIMatchmakerModule,
   ],
   controllers: [HealthController],
 })
