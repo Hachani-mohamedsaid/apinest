@@ -151,6 +151,61 @@ export class QuickMatchController {
     return matches;
   }
 
+  @Get('likes-received')
+  @ApiOperation({
+    summary: 'Get likes received by the current user',
+    description:
+      'Returns all users who have liked the current user\'s profile. Includes match status.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of likes received retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getLikesReceived(@Request() req) {
+    const userId = req.user._id.toString();
+    const likes = await this.quickMatchService.getLikesReceived(userId);
+
+    // Mapper les likes vers le format de réponse attendu
+    const likesResponse = await Promise.all(
+      likes.map(async (like) => {
+        const likeObj = like.toObject();
+        const fromUser = likeObj.fromUser as any;
+
+        // Récupérer le matchId si c'est un match
+        let matchId: string | null = null;
+        if (likeObj.isMatch) {
+          const match = await this.quickMatchService.getMatchByUsers(
+            userId,
+            fromUser._id.toString(),
+          );
+          matchId = match?._id.toString() || null;
+        }
+
+        return {
+          likeId: likeObj._id.toString(),
+          fromUser: {
+            _id: fromUser._id.toString(),
+            id: fromUser._id.toString(),
+            name: fromUser.name,
+            profileImageUrl: fromUser.profileImageUrl,
+            avatarUrl:
+              fromUser.profileImageUrl || fromUser.profileImageThumbnailUrl,
+          },
+          isMatch: likeObj.isMatch,
+          matchId: matchId,
+          createdAt: likeObj.createdAt
+            ? new Date(likeObj.createdAt).toISOString()
+            : new Date().toISOString(),
+        };
+      }),
+    );
+
+    return {
+      likes: likesResponse,
+    };
+  }
+
   /**
    * Mappe un profil utilisateur vers le format de réponse attendu par Android
    */

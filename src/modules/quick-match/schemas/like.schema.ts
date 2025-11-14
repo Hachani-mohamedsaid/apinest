@@ -13,6 +13,9 @@ export class Like {
 
   @Prop({ default: false })
   isMatch: boolean; // true si c'est un match mutuel
+
+  createdAt?: Date;
+  updatedAt?: Date;
 }
 
 export const LikeSchema = SchemaFactory.createForClass(Like);

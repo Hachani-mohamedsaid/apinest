@@ -475,4 +475,42 @@ export class QuickMatchService {
       };
     });
   }
+
+  /**
+   * Récupère tous les likes reçus par un utilisateur
+   * (utilisateurs qui ont liké son profil)
+   */
+  async getLikesReceived(userId: string): Promise<LikeDocument[]> {
+    // Récupérer tous les likes où l'utilisateur connecté est le destinataire (toUser)
+    const likes = await this.likeModel
+      .find({ toUser: new Types.ObjectId(userId) })
+      .populate('fromUser', 'name email profileImageUrl profileImageThumbnailUrl')
+      .sort({ createdAt: -1 }) // Plus récents en premier
+      .exec();
+
+    return likes;
+  }
+
+  /**
+   * Récupère un match entre deux utilisateurs
+   */
+  async getMatchByUsers(user1Id: string, user2Id: string): Promise<MatchDocument | null> {
+    // Vérifier dans les deux sens (user1-user2 et user2-user1)
+    const match = await this.matchModel
+      .findOne({
+        $or: [
+          {
+            user1: new Types.ObjectId(user1Id),
+            user2: new Types.ObjectId(user2Id),
+          },
+          {
+            user1: new Types.ObjectId(user2Id),
+            user2: new Types.ObjectId(user1Id),
+          },
+        ],
+      })
+      .exec();
+
+    return match;
+  }
 }
