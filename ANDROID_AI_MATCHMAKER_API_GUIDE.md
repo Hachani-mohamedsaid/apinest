@@ -14,471 +14,134 @@ POST /ai-matchmaker/chat
 
 ## 📦 1. Modèles de données (Data Classes)
 
-### ChatMessageDto.kt
+Les modèles de données sont déjà créés dans votre projet. Vérifiez les fichiers suivants :
 
-```kotlin
-data class ChatMessageDto(
-    val role: String, // "user" ou "assistant"
-    val content: String
-)
-```
-
-### ChatRequestDto.kt
-
-```kotlin
-data class ChatRequestDto(
-    val message: String,
-    val conversationHistory: List<ChatMessageDto>? = null
-)
-```
-
-### SuggestedActivityDto.kt
-
-```kotlin
-data class SuggestedActivityDto(
-    val id: String,
-    val title: String,
-    val sportType: String,
-    val location: String,
-    val date: String,
-    val time: String,
-    val participants: Int,
-    val maxParticipants: Int,
-    val level: String,
-    val matchScore: Double? = null
-)
-```
-
-### SuggestedUserDto.kt
-
-```kotlin
-data class SuggestedUserDto(
-    val id: String,
-    val name: String,
-    val profileImageUrl: String? = null,
-    val sport: String,
-    val distance: String? = null,
-    val matchScore: Double? = null,
-    val bio: String? = null,
-    val availability: String? = null
-)
-```
-
-### ChatResponseDto.kt
-
-```kotlin
-data class ChatResponseDto(
-    val message: String,
-    val suggestedActivities: List<SuggestedActivityDto>? = null,
-    val suggestedUsers: List<SuggestedUserDto>? = null,
-    val options: List<String>? = null
-)
-```
+- `app/src/main/java/com/example/damandroid/api/AIMatchmakerApiService.kt` - Contient tous les DTOs nécessaires
+- `app/src/main/java/com/example/damandroid/api/AIMatchmakerRepository.kt` - Repository avec gestion d'erreurs
 
 ## 🌐 2. Service API (Retrofit)
 
-### AIMatchmakerApiService.kt
+Le service API est déjà configuré dans `AIMatchmakerApiService.kt` et intégré dans `RetrofitClient.kt`.
+
+### Utilisation
 
 ```kotlin
-import retrofit2.http.*
-
-interface AIMatchmakerApiService {
-    @POST("ai-matchmaker/chat")
-    suspend fun chat(
-        @Header("Authorization") token: String,
-        @Body request: ChatRequestDto
-    ): Response<ChatResponseDto>
-}
-```
-
-### Configuration Retrofit
-
-```kotlin
-object ApiClient {
-    private const val BASE_URL = "https://apinest-production.up.railway.app/"
-    
-    private val retrofit = Retrofit.Builder()
-        .baseUrl(BASE_URL)
-        .addConverterFactory(GsonConverterFactory.create())
-        .build()
-    
-    val aiMatchmakerService: AIMatchmakerApiService = 
-        retrofit.create(AIMatchmakerApiService::class.java)
-}
+val aiMatchmakerApiService = RetrofitClient.aiMatchmakerApiService
 ```
 
 ## 🏗️ 3. Repository
 
-### AIMatchmakerRepository.kt
+Le repository est déjà implémenté dans `AIMatchmakerRepository.kt` avec :
+
+- Gestion d'erreurs complète (429, 401, 403, 404, 500)
+- Messages d'erreur en français
+- Support de l'historique de conversation
+
+### Utilisation
 
 ```kotlin
-class AIMatchmakerRepository(
-    private val apiService: AIMatchmakerApiService,
-    private val tokenManager: TokenManager // Votre gestionnaire de token
-) {
-    suspend fun sendMessage(
-        message: String,
-        conversationHistory: List<ChatMessageDto>? = null
-    ): Result<ChatResponseDto> {
-        return try {
-            val token = tokenManager.getToken()
-            if (token == null) {
-                Result.failure(Exception("Token non disponible"))
-            } else {
-                val request = ChatRequestDto(
-                    message = message,
-                    conversationHistory = conversationHistory
-                )
-                val response = apiService.chat("Bearer $token", request)
-                
-                if (response.isSuccessful && response.body() != null) {
-                    Result.success(response.body()!!)
-                } else {
-                    val errorBody = response.errorBody()?.string()
-                    Result.failure(Exception("Erreur: ${response.code()} - $errorBody"))
-                }
-            }
-        } catch (e: Exception) {
-            Result.failure(e)
-        }
+val repository = AIMatchmakerRepository()
+
+val result = repository.sendMessage(
+    message = "Trouver un partenaire de course",
+    conversationHistory = listOf(...)
+)
+
+when (result) {
+    is AIMatchmakerChatResult.Success -> {
+        // Traiter la réponse
+        val response = result.response
+    }
+    is AIMatchmakerChatResult.Error -> {
+        // Gérer l'erreur
+        val errorMessage = result.message
     }
 }
 ```
 
 ## 🎨 4. ViewModel (State Management)
 
-### AIMatchmakerViewModel.kt
+Le ViewModel est déjà implémenté dans `AIMatchmakerViewModel.kt` avec :
+
+- Gestion de l'état de l'UI
+- Historique de conversation
+- Conversion automatique des DTOs en modèles UI
+
+### Utilisation
 
 ```kotlin
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.viewModelScope
-import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.StateFlow
-import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.launch
-
-class AIMatchmakerViewModel(
-    private val repository: AIMatchmakerRepository
-) : ViewModel() {
-    
-    private val _uiState = MutableStateFlow(AIMatchmakerUiState())
-    val uiState: StateFlow<AIMatchmakerUiState> = _uiState.asStateFlow()
-    
-    private val conversationHistory = mutableListOf<ChatMessageDto>()
-    
-    fun sendMessage(message: String) {
-        if (message.isBlank()) return
-        
-        // Ajouter le message utilisateur à l'historique
-        conversationHistory.add(ChatMessageDto("user", message))
-        
-        // Mettre à jour l'UI
-        _uiState.value = _uiState.value.copy(
-            isLoading = true,
-            error = null,
-            messages = _uiState.value.messages + ChatMessageDto("user", message)
-        )
-        
-        viewModelScope.launch {
-            repository.sendMessage(message, conversationHistory.toList())
-                .onSuccess { response ->
-                    // Ajouter la réponse de l'IA à l'historique
-                    conversationHistory.add(ChatMessageDto("assistant", response.message))
-                    
-                    // Mettre à jour l'UI avec la réponse
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        messages = _uiState.value.messages + ChatMessageDto("assistant", response.message),
-                        suggestedActivities = response.suggestedActivities,
-                        suggestedUsers = response.suggestedUsers,
-                        options = response.options
-                    )
-                }
-                .onFailure { error ->
-                    _uiState.value = _uiState.value.copy(
-                        isLoading = false,
-                        error = error.message ?: "Une erreur est survenue"
-                    )
-                }
-        }
-    }
-    
-    fun clearError() {
-        _uiState.value = _uiState.value.copy(error = null)
-    }
+val viewModel: AIMatchmakerViewModel = remember {
+    AIMatchmakerViewModel(
+        getRecommendations = GetMatchmakerRecommendations(...),
+        aiMatchmakerRepository = AIMatchmakerRepository()
+    )
 }
 
-data class AIMatchmakerUiState(
-    val messages: List<ChatMessageDto> = emptyList(),
-    val isLoading: Boolean = false,
-    val error: String? = null,
-    val suggestedActivities: List<SuggestedActivityDto>? = null,
-    val suggestedUsers: List<SuggestedUserDto>? = null,
-    val options: List<String>? = null
-)
+// Envoyer un message
+viewModel.sendMessage("Trouver un partenaire de course")
+
+// Observer l'état
+val uiState by viewModel.uiState.collectAsState()
 ```
 
 ## 🎨 5. UI avec Jetpack Compose
 
-### AIMatchmakerScreen.kt
+L'écran principal est déjà implémenté dans `AIMatchmakerScreen.kt` avec :
+
+- Interface de chat moderne
+- Affichage des messages utilisateur/IA
+- Suggestions d'activités et d'utilisateurs
+- Options interactives
+- Indicateur de chargement
+
+### Utilisation
 
 ```kotlin
-@Composable
-fun AIMatchmakerScreen(
-    viewModel: AIMatchmakerViewModel = hiltViewModel(),
-    onActivityClick: (String) -> Unit = {},
-    onUserClick: (String) -> Unit = {}
-) {
-    val uiState by viewModel.uiState.collectAsState()
-    var messageText by remember { mutableStateOf("") }
-    
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(16.dp)
-    ) {
-        // Liste des messages
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(uiState.messages) { message ->
-                ChatMessageItem(message = message)
-            }
-            
-            if (uiState.isLoading) {
-                item {
-                    CircularProgressIndicator(
-                        modifier = Modifier.align(Alignment.CenterHorizontally)
-                    )
-                }
-            }
-        }
-        
-        // Suggestions d'activités
-        uiState.suggestedActivities?.let { activities ->
-            SuggestedActivitiesSection(
-                activities = activities,
-                onActivityClick = onActivityClick
-            )
-        }
-        
-        // Suggestions d'utilisateurs
-        uiState.suggestedUsers?.let { users ->
-            SuggestedUsersSection(
-                users = users,
-                onUserClick = onUserClick
-            )
-        }
-        
-        // Options
-        uiState.options?.let { options ->
-            OptionsSection(options = options)
-        }
-        
-        // Gestion des erreurs
-        uiState.error?.let { error ->
-            ErrorMessage(
-                message = error,
-                onDismiss = { viewModel.clearError() }
-            )
-        }
-        
-        // Champ de saisie
-        MessageInputField(
-            message = messageText,
-            onMessageChange = { messageText = it },
-            onSendClick = {
-                viewModel.sendMessage(messageText)
-                messageText = ""
-            },
-            enabled = !uiState.isLoading
-        )
-    }
-}
-
-@Composable
-fun ChatMessageItem(message: ChatMessageDto) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(8.dp),
-        horizontalArrangement = if (message.role == "user") 
-            Arrangement.End else Arrangement.Start
-    ) {
-        Card(
-            modifier = Modifier.widthIn(max = 280.dp),
-            colors = CardDefaults.cardColors(
-                containerColor = if (message.role == "user") 
-                    MaterialTheme.colorScheme.primary 
-                else 
-                    MaterialTheme.colorScheme.surfaceVariant
-            )
-        ) {
-            Text(
-                text = message.content,
-                modifier = Modifier.padding(12.dp),
-                color = if (message.role == "user") 
-                    MaterialTheme.colorScheme.onPrimary 
-                else 
-                    MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-}
-
-@Composable
-fun SuggestedActivitiesSection(
-    activities: List<SuggestedActivityDto>,
-    onActivityClick: (String) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp)
-    ) {
-        Text(
-            text = "Activités suggérées",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-        
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(activities) { activity ->
-                ActivityCard(
-                    activity = activity,
-                    onClick = { onActivityClick(activity.id) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun SuggestedUsersSection(
-    users: List<SuggestedUserDto>,
-    onUserClick: (String) -> Unit
-) {
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp)
-    ) {
-        Text(
-            text = "Partenaires suggérés",
-            style = MaterialTheme.typography.titleMedium,
-            modifier = Modifier.padding(bottom = 8.dp)
-        )
-        
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(users) { user ->
-                UserCard(
-                    user = user,
-                    onClick = { onUserClick(user.id) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-fun MessageInputField(
-    message: String,
-    onMessageChange: (String) -> Unit,
-    onSendClick: () -> Unit,
-    enabled: Boolean
-) {
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        OutlinedTextField(
-            value = message,
-            onValueChange = onMessageChange,
-            modifier = Modifier.weight(1f),
-            placeholder = { Text("Tapez votre message...") },
-            enabled = enabled,
-            singleLine = false,
-            maxLines = 4
-        )
-        
-        Spacer(modifier = Modifier.width(8.dp))
-        
-        IconButton(
-            onClick = onSendClick,
-            enabled = enabled && message.isNotBlank()
-        ) {
-            Icon(
-                imageVector = Icons.Default.Send,
-                contentDescription = "Envoyer"
-            )
-        }
-    }
-}
+AIMatchmakerRoute(
+    viewModel = matchmakerViewModel,
+    onBack = { /* navigation */ },
+    onJoinActivity = { profile -> /* rejoindre activité */ },
+    onViewProfile = { profile -> /* voir profil */ }
+)
 ```
 
 ## 🔧 6. Gestion des erreurs
 
-### Gestion spécifique de l'erreur 429
+### Erreurs gérées automatiquement
 
-```kotlin
-fun sendMessage(message: String, conversationHistory: List<ChatMessageDto>? = null) {
-    // ... code existant ...
-    
-    viewModelScope.launch {
-        repository.sendMessage(message, conversationHistory)
-            .onSuccess { response ->
-                // ... traitement du succès ...
-            }
-            .onFailure { error ->
-                when {
-                    error.message?.contains("429") == true -> {
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            error = "Quota API dépassé. Le service utilise un mode de secours."
-                        )
-                        // Le backend retourne quand même des suggestions via le fallback
-                    }
-                    error.message?.contains("401") == true -> {
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            error = "Session expirée. Veuillez vous reconnecter."
-                        )
-                        // Naviguer vers l'écran de connexion
-                    }
-                    else -> {
-                        _uiState.value = _uiState.value.copy(
-                            isLoading = false,
-                            error = error.message ?: "Une erreur est survenue"
-                        )
-                    }
-                }
-            }
-    }
-}
-```
+- **429 (Quota dépassé)** : Message clair pour l'utilisateur. Le backend utilise automatiquement le mode fallback.
+- **401 (Non autorisé)** : Invite à se reconnecter
+- **403 (Accès refusé)** : Message d'erreur approprié
+- **404 (Service non trouvé)** : Message d'erreur
+- **500 (Erreur serveur)** : Message invitant à réessayer plus tard
+
+### Affichage des erreurs
+
+Les erreurs sont automatiquement affichées dans l'UI via le `AIMatchmakerUiState.error`.
 
 ## 📝 7. Exemple d'utilisation complète
 
 ```kotlin
 @Composable
 fun AIMatchmakerScreenExample() {
-    val viewModel: AIMatchmakerViewModel = hiltViewModel()
-    val navController = rememberNavController()
+    val aiMatchmakerRepository = remember { AIMatchmakerRepository() }
+    val matchmakerViewModel = remember {
+        AIMatchmakerViewModel(
+            getRecommendations = GetMatchmakerRecommendations(...),
+            aiMatchmakerRepository = aiMatchmakerRepository
+        )
+    }
     
-    AIMatchmakerScreen(
-        viewModel = viewModel,
-        onActivityClick = { activityId ->
+    AIMatchmakerRoute(
+        viewModel = matchmakerViewModel,
+        onBack = { /* navigation */ },
+        onJoinActivity = { profile ->
             // Naviguer vers les détails de l'activité
-            navController.navigate("activity/$activityId")
+            navController.navigate("activity/${profile.id}")
         },
-        onUserClick = { userId ->
+        onViewProfile = { profile ->
             // Naviguer vers le profil de l'utilisateur
-            navController.navigate("user/$userId")
+            navController.navigate("user/${profile.id}")
         }
     )
 }
@@ -486,15 +149,19 @@ fun AIMatchmakerScreenExample() {
 
 ## 🎯 8. Points importants
 
-1. **Authentification** : N'oubliez pas d'inclure le token JWT dans le header `Authorization`
-2. **Historique de conversation** : Maintenez l'historique pour un contexte continu
-3. **Gestion d'erreurs** : Le backend retourne toujours des suggestions même en cas d'erreur 429 (fallback)
-4. **UI/UX** : Affichez clairement les suggestions d'activités et d'utilisateurs
-5. **Performance** : Utilisez `LazyColumn` et `LazyRow` pour de grandes listes
+1. **Authentification** : Le token JWT est automatiquement ajouté via `AuthInterceptor` dans `RetrofitClient.kt`
+
+2. **Historique de conversation** : L'historique est automatiquement géré par le ViewModel
+
+3. **Gestion d'erreurs 429** : Le backend retourne toujours des suggestions même en cas d'erreur 429 grâce au système de fallback
+
+4. **UI/UX** : L'interface affiche clairement les suggestions d'activités et d'utilisateurs avec des cartes visuelles
+
+5. **Performance** : Utilisation de `LazyColumn` pour les listes de messages
 
 ## 🔗 9. Dépendances nécessaires
 
-Dans votre `build.gradle.kts` :
+Toutes les dépendances sont déjà configurées dans votre `build.gradle.kts` :
 
 ```kotlin
 dependencies {
@@ -507,26 +174,77 @@ dependencies {
     
     // ViewModel
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.6.2")
-    
-    // Hilt (si vous l'utilisez)
-    implementation("com.google.dagger:hilt-android:2.48")
-    kapt("com.google.dagger:hilt-compiler:2.48")
 }
 ```
 
 ## ✅ Checklist d'intégration
 
-- [ ] Créer les data classes (DTOs)
-- [ ] Créer le service API Retrofit
-- [ ] Créer le Repository
-- [ ] Créer le ViewModel avec StateFlow
-- [ ] Créer l'UI avec Jetpack Compose
-- [ ] Gérer l'authentification (token JWT)
-- [ ] Gérer les erreurs (429, 401, etc.)
-- [ ] Implémenter la navigation vers les activités/utilisateurs suggérés
-- [ ] Tester avec différents scénarios
+- [x] Créer les data classes (DTOs) - **Déjà fait**
+- [x] Créer le service API Retrofit - **Déjà fait**
+- [x] Créer le Repository - **Déjà fait**
+- [x] Créer le ViewModel avec StateFlow - **Déjà fait**
+- [x] Créer l'UI avec Jetpack Compose - **Déjà fait**
+- [x] Gérer l'authentification (token JWT) - **Déjà fait via AuthInterceptor**
+- [x] Gérer les erreurs (429, 401, etc.) - **Déjà fait**
+- [ ] Implémenter la navigation vers les activités/utilisateurs suggérés - **À faire selon vos besoins**
+- [ ] Tester avec différents scénarios - **À faire**
 
-## 🚀 Prêt à utiliser !
+## 🚀 Fonctionnalités implémentées
 
-Votre application Android peut maintenant utiliser l'AI Matchmaker pour aider les utilisateurs à trouver des partenaires et des activités de sport !
+### ✅ Système de chat complet
+- Interface de chat moderne avec messages utilisateur/IA
+- Historique de conversation automatique
+- Indicateur de chargement pendant l'envoi
 
+### ✅ Suggestions intelligentes
+- Suggestions d'activités basées sur les préférences
+- Suggestions d'utilisateurs/partenaires
+- Options interactives pour guider l'utilisateur
+
+### ✅ Gestion d'erreurs robuste
+- Messages d'erreur clairs en français
+- Gestion spécifique de l'erreur 429 (quota dépassé)
+- Fallback automatique côté backend
+
+### ✅ Design moderne
+- Interface glassmorphism
+- Animations fluides
+- Support du mode sombre/clair
+
+## 🔄 Mode Fallback
+
+Quand le quota OpenAI est dépassé (erreur 429), le backend utilise automatiquement un système de fallback qui :
+
+1. Analyse le message de l'utilisateur
+2. Recherche dans les données de l'application (activités, utilisateurs)
+3. Génère des suggestions pertinentes sans utiliser l'API OpenAI
+4. Retourne une réponse cohérente à l'utilisateur
+
+**L'utilisateur ne voit aucune différence** - l'application continue de fonctionner normalement !
+
+## 📚 Documentation supplémentaire
+
+- **Backend NestJS** : Voir `OPENAI_QUOTA_MANAGEMENT.md` pour la gestion du quota OpenAI
+- **Architecture** : Voir les fichiers source dans `app/src/main/java/com/example/damandroid/`
+
+## 🐛 Dépannage
+
+### Problème : Erreur 429 (Quota dépassé)
+
+**Solution** : Le backend utilise automatiquement le mode fallback. L'application continue de fonctionner.
+
+### Problème : Erreur 401 (Non autorisé)
+
+**Solution** : Vérifiez que l'utilisateur est bien connecté et que le token JWT est valide.
+
+### Problème : Pas de suggestions affichées
+
+**Solution** : Vérifiez que le backend retourne bien les suggestions dans la réponse. Le mode fallback devrait toujours retourner des suggestions.
+
+## 🎉 Prêt à utiliser !
+
+Votre application Android est déjà configurée et prête à utiliser l'AI Matchmaker ! Il vous suffit de :
+
+1. Vérifier que le backend NestJS est déployé avec le module AI Matchmaker
+2. Tester l'application avec différents messages
+3. Implémenter la navigation vers les activités/utilisateurs suggérés selon vos besoins

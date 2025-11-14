@@ -137,7 +137,7 @@ Get-ChildItem -Recurse -Filter "._*" | Remove-Item -Force
 - **Intégration Android - AI Matchmaker** : Voir [ANDROID_AI_MATCHMAKER_API_GUIDE.md](./ANDROID_AI_MATCHMAKER_API_GUIDE.md) pour intégrer l'AI Matchmaker dans votre app Android (Jetpack Compose + Kotlin)
 - **Intégration Android - Chat** : Voir [ANDROID_CHAT_API_GUIDE.md](./ANDROID_CHAT_API_GUIDE.md) pour intégrer le système de chat
 - **Intégration Android - Activités** : Voir [ANDROID_ACTIVITY_API_GUIDE.md](./ANDROID_ACTIVITY_API_GUIDE.md) pour intégrer les activités
-- **Gestion du quota OpenAI** : Voir [OPENAI_QUOTA_MANAGEMENT.md](./OPENAI_QUOTA_MANAGEMENT.md) pour gérer les erreurs 429 et optimiser les coûts
+- **Gestion du quota OpenAI** : Voir [OPENAI_QUOTA_MANAGEMENT.md](./OPENAI_QUOTA_MANAGEMENT.md) pour gérer les erreurs 429 et optimiser les coûts...
 - **Configuration MongoDB** : Voir [CONFIG_MONGODB.md](./CONFIG_MONGODB.md)
 - **Configuration Railway** : Voir [RAILWAY_MONGODB_SETUP.md](./RAILWAY_MONGODB_SETUP.md)
 - **Configuration Email** : Voir [SENDGRID_SETUP.md](./SENDGRID_SETUP.md) ou [GMAIL_SMTP_SETUP.md](./GMAIL_SMTP_SETUP.md)
