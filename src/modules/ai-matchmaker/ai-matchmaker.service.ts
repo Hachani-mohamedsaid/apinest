@@ -50,24 +50,8 @@ export class AIMatchmakerService {
       // Préparer les messages pour ChatGPT
       const messages = this.prepareMessages(chatRequest, context);
 
-      // Appeler l'API ChatGPT
-      const response = await axios.post(
-        this.openaiApiUrl,
-        {
-          model: this.openaiModel,
-          messages: messages,
-          temperature: 0.7,
-          max_tokens: 1000,
-        },
-        {
-          headers: {
-            'Authorization': `Bearer ${this.openaiApiKey}`,
-            'Content-Type': 'application/json',
-          },
-        }
-      );
-
-      const aiResponse = response.data.choices[0].message.content;
+      // Appeler l'API ChatGPT avec retry en cas d'erreur 429
+      const aiResponse = await this.callOpenAIWithRetry(messages);
 
       // Parser la réponse de l'IA pour extraire les suggestions
       const parsedResponse = this.parseAIResponse(aiResponse, activities, users);
@@ -75,20 +59,34 @@ export class AIMatchmakerService {
       return parsedResponse;
     } catch (error) {
       console.error('Error in AI Matchmaker chat:', error);
+      
+      // Si erreur 429, utiliser un fallback intelligent basé sur les données disponibles
+      if (error.response?.status === 429 || error.statusCode === 429) {
+        console.warn('OpenAI API quota exceeded, using fallback response');
+        try {
+          // Récupérer les données pour le fallback
+          const user = await this.userModel.findById(userId).exec();
+          const activities = await this.activityModel
+            .find({ visibility: 'public' })
+            .limit(20)
+            .populate('creator', 'name email profileImageUrl')
+            .exec();
+          
+          const users = await this.userModel
+            .find({ _id: { $ne: userId } })
+            .limit(20)
+            .select('name email location sportsInterests profileImageUrl about')
+            .exec();
+
+          return this.generateFallbackResponse(chatRequest, activities, users);
+        } catch (fallbackError) {
+          console.error('Error generating fallback response:', fallbackError);
+        }
+      }
+      
       if (error.response) {
         const statusCode = error.response.status || HttpStatus.INTERNAL_SERVER_ERROR;
         const errorMessage = error.response.data?.error?.message || error.message;
-        
-        // Gestion spéciale pour le quota dépassé (429)
-        if (statusCode === 429) {
-          throw new HttpException(
-            {
-              statusCode: 429,
-              message: 'Quota API OpenAI dépassé. Le service AI est temporairement indisponible. Veuillez réessayer plus tard ou contacter l\'administrateur.',
-            },
-            HttpStatus.TOO_MANY_REQUESTS,
-          );
-        }
         
         throw new HttpException(
           {
@@ -98,6 +96,7 @@ export class AIMatchmakerService {
           statusCode,
         );
       }
+      
       throw new HttpException(
         {
           statusCode: HttpStatus.INTERNAL_SERVER_ERROR,
@@ -314,6 +313,169 @@ export class AIMatchmakerService {
       suggestedActivities: suggestedActivities.length > 0 ? suggestedActivities : undefined,
       suggestedUsers: suggestedUsers.length > 0 ? suggestedUsers : undefined,
       options: options.length > 0 ? options : undefined,
+    };
+  }
+
+  private async callOpenAIWithRetry(messages: any[], maxRetries = 2): Promise<string> {
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await axios.post(
+          this.openaiApiUrl,
+          {
+            model: this.openaiModel,
+            messages: messages,
+            temperature: 0.7,
+            max_tokens: 1000,
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${this.openaiApiKey}`,
+              'Content-Type': 'application/json',
+            },
+          }
+        );
+
+        return response.data.choices[0].message.content;
+      } catch (error) {
+        // Si c'est une erreur 429 et qu'il reste des tentatives, attendre avant de réessayer
+        if (error.response?.status === 429 && attempt < maxRetries) {
+          const waitTime = Math.pow(2, attempt) * 1000; // Backoff exponentiel: 1s, 2s, 4s
+          console.log(`Rate limited, retrying in ${waitTime}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+          await new Promise(resolve => setTimeout(resolve, waitTime));
+          continue;
+        }
+        // Si c'est la dernière tentative ou une autre erreur, propager l'erreur
+        throw error;
+      }
+    }
+    throw new Error('Max retries exceeded');
+  }
+
+  private generateFallbackResponse(
+    chatRequest: ChatRequestDto,
+    activities: any[],
+    users: any[],
+  ): ChatResponseDto {
+    const messageLower = chatRequest.message.toLowerCase();
+    const suggestedActivities: SuggestedActivityDto[] = [];
+    const suggestedUsers: SuggestedUserDto[] = [];
+    let message = '';
+
+    // Détecter l'intention de l'utilisateur
+    const isLookingForActivities = messageLower.includes('activité') || 
+                                   messageLower.includes('activite') || 
+                                   messageLower.includes('groupe') || 
+                                   messageLower.includes('rejoindre') ||
+                                   messageLower.includes('participer');
+
+    const isLookingForPartners = messageLower.includes('partenaire') || 
+                                 messageLower.includes('course') || 
+                                 messageLower.includes('running') || 
+                                 messageLower.includes('coureur') ||
+                                 messageLower.includes('trouver');
+
+    // Générer des suggestions basées sur l'intention
+    if (isLookingForActivities && activities.length > 0) {
+      // Prendre les 3 premières activités disponibles
+      activities.slice(0, 3).forEach(activity => {
+        const dateStr = activity.date instanceof Date 
+          ? activity.date.toLocaleDateString('fr-FR') 
+          : String(activity.date);
+        const timeStr = activity.time instanceof Date 
+          ? activity.time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+          : String(activity.time);
+
+        suggestedActivities.push({
+          id: activity._id.toString(),
+          title: activity.title,
+          sportType: activity.sportType,
+          location: activity.location,
+          date: dateStr,
+          time: timeStr,
+          participants: activity.participants || 0,
+          maxParticipants: activity.participants || 10,
+          level: activity.level,
+          matchScore: 85 + Math.floor(Math.random() * 15),
+        });
+      });
+
+      message = `Voici ${suggestedActivities.length} activité${suggestedActivities.length > 1 ? 's' : ''} qui pourraient vous intéresser :`;
+    }
+
+    if (isLookingForPartners && users.length > 0) {
+      // Prendre les 3 premiers utilisateurs disponibles
+      users.slice(0, 3).forEach(user => {
+        suggestedUsers.push({
+          id: user._id.toString(),
+          name: user.name,
+          profileImageUrl: user.profileImageUrl,
+          sport: user.sportsInterests?.[0] || 'Sport',
+          distance: 'Proche',
+          matchScore: 80 + Math.floor(Math.random() * 20),
+          bio: user.about,
+          availability: 'Disponible',
+        });
+      });
+
+      if (!message) {
+        message = `Voici ${suggestedUsers.length} partenaire${suggestedUsers.length > 1 ? 's' : ''} qui pourrait${suggestedUsers.length > 1 ? 'ent' : ''} vous intéresser :`;
+      }
+    }
+
+    // Si aucune intention claire, proposer les deux
+    if (!isLookingForActivities && !isLookingForPartners) {
+      if (activities.length > 0) {
+        activities.slice(0, 2).forEach(activity => {
+          const dateStr = activity.date instanceof Date 
+            ? activity.date.toLocaleDateString('fr-FR') 
+            : String(activity.date);
+          const timeStr = activity.time instanceof Date 
+            ? activity.time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+            : String(activity.time);
+
+          suggestedActivities.push({
+            id: activity._id.toString(),
+            title: activity.title,
+            sportType: activity.sportType,
+            location: activity.location,
+            date: dateStr,
+            time: timeStr,
+            participants: activity.participants || 0,
+            maxParticipants: activity.participants || 10,
+            level: activity.level,
+            matchScore: 80 + Math.floor(Math.random() * 15),
+          });
+        });
+      }
+
+      if (users.length > 0) {
+        users.slice(0, 2).forEach(user => {
+          suggestedUsers.push({
+            id: user._id.toString(),
+            name: user.name,
+            profileImageUrl: user.profileImageUrl,
+            sport: user.sportsInterests?.[0] || 'Sport',
+            distance: 'Proche',
+            matchScore: 75 + Math.floor(Math.random() * 20),
+            bio: user.about,
+            availability: 'Disponible',
+          });
+        });
+      }
+
+      message = 'Voici quelques suggestions pour vous :';
+    }
+
+    // Message par défaut si rien n'a été trouvé
+    if (!message) {
+      message = 'Je suis désolé, je ne trouve pas de suggestions pour le moment. Veuillez réessayer plus tard.';
+    }
+
+    return {
+      message,
+      suggestedActivities: suggestedActivities.length > 0 ? suggestedActivities : undefined,
+      suggestedUsers: suggestedUsers.length > 0 ? suggestedUsers : undefined,
+      options: ['Voir toutes les activités', 'Rechercher des partenaires', 'Créer une activité'],
     };
   }
 }
