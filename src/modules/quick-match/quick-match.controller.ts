@@ -27,9 +27,23 @@ export class QuickMatchController {
   constructor(private readonly quickMatchService: QuickMatchService) {}
 
   @Get('profiles')
-  @ApiOperation({ summary: 'Get compatible profiles based on sports interests' })
-  @ApiQuery({ name: 'page', required: false, type: Number, description: 'Page number (default: 1)' })
-  @ApiQuery({ name: 'limit', required: false, type: Number, description: 'Results per page (default: 20)' })
+  @ApiOperation({
+    summary: 'Get compatible profiles based on sports interests',
+    description:
+      'Returns users who have at least one common sport/interest. Excludes already liked, passed, or matched profiles.',
+  })
+  @ApiQuery({
+    name: 'page',
+    required: false,
+    type: Number,
+    description: 'Page number (default: 1)',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Results per page (default: 20)',
+  })
   @ApiResponse({
     status: 200,
     description: 'List of compatible profiles retrieved successfully',
@@ -63,7 +77,11 @@ export class QuickMatchController {
   }
 
   @Post('like')
-  @ApiOperation({ summary: 'Like a profile' })
+  @ApiOperation({
+    summary: 'Like a profile',
+    description:
+      'Records a like. If the other user also liked you, creates a match.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Profile liked successfully',
@@ -99,7 +117,11 @@ export class QuickMatchController {
   }
 
   @Post('pass')
-  @ApiOperation({ summary: 'Pass on a profile' })
+  @ApiOperation({
+    summary: 'Pass on a profile',
+    description:
+      'Records a pass. This profile will not appear again in future searches.',
+  })
   @ApiResponse({
     status: 200,
     description: 'Profile passed successfully',
@@ -130,7 +152,7 @@ export class QuickMatchController {
   }
 
   /**
-   * Mappe un profil utilisateur vers le format de réponse attendu
+   * Mappe un profil utilisateur vers le format de réponse attendu par Android
    */
   private mapToResponse(profile: any) {
     return {
@@ -216,7 +238,11 @@ export class QuickMatchController {
       Climbing: '🧗',
       Boxing: '🥊',
       MartialArts: '🥋',
-      // Ajouter d'autres sports...
+      Hiking: '🥾',
+      Dance: '💃',
+      Pilates: '🧘‍♀️',
+      Zumba: '🎵',
+      CrossFit: '💪',
     };
 
     return icons[sportName] || '🏃';

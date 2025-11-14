@@ -23,8 +23,14 @@ export class QuickMatchService {
 
   /**
    * Récupère les profils compatibles avec l'utilisateur connecté
-   * Filtre par sports/intérêts communs basés sur les activités
-   * Exclut les profils déjà likés, passés ou matchés
+   *
+   * LOGIQUE DE FILTRAGE :
+   * 1. Récupère les sportsInterests de l'utilisateur connecté
+   * 2. Récupère les activités créées par l'utilisateur
+   * 3. Combine : sportsInterests + sports des activités = liste complète des sports
+   * 4. Filtre les autres utilisateurs qui ont AU MOINS UN sport en commun
+   * 5. Exclut les profils déjà likés, passés ou matchés
+   *
    * @param userId ID de l'utilisateur connecté
    * @param page Numéro de page (défaut: 1)
    * @param limit Nombre de résultats par page (défaut: 20)
@@ -49,17 +55,21 @@ export class QuickMatchService {
       .exec();
 
     // 4. Extraire les sports des activités de l'utilisateur
-    const activitySports = userActivities.map((activity) => activity.sportType);
+    const activitySports = userActivities
+      .map((activity) => activity.sportType)
+      .filter(Boolean); // Filtrer les valeurs vides
+
+    // 5. Combiner sportsInterests + sports des activités (sans doublons)
     const allUserSports = [
       ...new Set([...userSportsInterests, ...activitySports]),
-    ].filter(Boolean); // Filtrer les valeurs vides
+    ].filter(Boolean);
 
     // Si l'utilisateur n'a aucun sport, retourner une liste vide
     if (allUserSports.length === 0) {
       return { profiles: [], total: 0, page, totalPages: 0 };
     }
 
-    // 5. Récupérer les IDs des profils déjà likés, passés ou matchés
+    // 6. Récupérer les IDs des profils déjà likés, passés ou matchés
     const [likedProfiles, passedProfiles, matchedProfiles] = await Promise.all([
       this.likeModel
         .find({ fromUser: new Types.ObjectId(userId) })
@@ -91,27 +101,31 @@ export class QuickMatchService {
       );
     });
 
-    // 6. Construire la requête MongoDB pour filtrer les utilisateurs
+    // Construire la liste des IDs à exclure
+    const excludedUserIdsArray = Array.from(excludedUserIds);
+
+    // 7. Construire la requête MongoDB
     const excludedIds = [
-      new Types.ObjectId(userId),
-      ...Array.from(excludedUserIds).map((id) => new Types.ObjectId(id)),
+      new Types.ObjectId(userId), // Exclure l'utilisateur connecté
+      ...excludedUserIdsArray.map((id) => new Types.ObjectId(id)),
     ];
 
+    // 8. Requête pour trouver les utilisateurs avec au moins un sport en commun
+    // Utiliser $in avec regex pour la recherche case-insensitive
     const query: any = {
       _id: { $nin: excludedIds },
     };
 
-    // Filtrer par sports communs (au moins un sport en commun)
     if (allUserSports.length > 0) {
       query.sportsInterests = {
-        $in: allUserSports.map((sport) => new RegExp(sport, 'i')),
+        $in: allUserSports.map((sport) => new RegExp(`^${sport}$`, 'i')),
       };
     }
 
-    // 7. Compter le total de profils compatibles
+    // 9. Compter le total de profils compatibles
     const total = await this.userModel.countDocuments(query).exec();
 
-    // 8. Récupérer les profils avec pagination
+    // 10. Récupérer les profils avec pagination
     const skip = (page - 1) * limit;
     const allUsers = await this.userModel
       .find(query)
@@ -119,7 +133,7 @@ export class QuickMatchService {
       .limit(limit)
       .exec();
 
-    // 9. Filtrer les utilisateurs qui ont au moins un sport/intérêt commun (double vérification)
+    // 11. Double vérification : filtrer les utilisateurs qui ont au moins un sport en commun
     const compatibleProfiles = allUsers.filter((user) => {
       const userSports = user.sportsInterests || [];
 
@@ -134,7 +148,7 @@ export class QuickMatchService {
       return hasCommonSport;
     });
 
-    // 10. Enrichir avec les données des activités et distance
+    // 12. Enrichir avec les données des activités et distance
     const enrichedProfiles = await Promise.all(
       compatibleProfiles.map(async (user) => {
         // Compter les activités créées par cet utilisateur
@@ -143,10 +157,7 @@ export class QuickMatchService {
         }).exec();
 
         // Calculer la distance (si on a les coordonnées GPS)
-        const distance = this.calculateDistance(
-          currentUser,
-          user,
-        );
+        const distance = this.calculateDistance(currentUser, user);
 
         return {
           ...user.toObject(),
@@ -156,7 +167,7 @@ export class QuickMatchService {
       }),
     );
 
-    // 11. Trier par pertinence (nombre de sports en commun, distance, etc.)
+    // 13. Trier par pertinence (nombre de sports en commun, distance, etc.)
     const sortedProfiles = this.sortByRelevance(enrichedProfiles, allUserSports);
 
     const totalPages = Math.ceil(total / limit);
@@ -226,9 +237,9 @@ export class QuickMatchService {
 
   /**
    * Calcule un score de pertinence basé sur :
-   * - Nombre de sports en commun
-   * - Nombre d'activités
-   * - Distance (si disponible)
+   * - Nombre de sports en commun (poids: 10)
+   * - Nombre d'activités (poids: 1)
+   * - Distance (poids: 5 max)
    */
   private calculateRelevanceScore(profile: any, userSports: string[]): number {
     const profileSports = profile.sportsInterests || [];
@@ -370,6 +381,8 @@ export class QuickMatchService {
 
   /**
    * Enregistre un pass (utilisateur passe ce profil)
+   *
+   * IMPORTANT : Cette méthode doit être appelée à chaque fois qu'un utilisateur passe un profil
    */
   async passProfile(userId: string, profileId: string): Promise<void> {
     // Vérifier que les utilisateurs existent

@@ -3,8 +3,8 @@ import { IsString, IsNotEmpty } from 'class-validator';
 
 export class LikeProfileDto {
   @ApiProperty({
+    description: 'ID du profil à liker',
     example: '507f1f77bcf86cd799439011',
-    description: 'ID of the profile to like',
   })
   @IsString()
   @IsNotEmpty({ message: 'Profile ID is required' })
