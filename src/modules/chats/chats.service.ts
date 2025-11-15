@@ -37,6 +37,41 @@ export class ChatsService {
   }
 
   /**
+   * Vérifie si un utilisateur est participant d'un chat
+   * Gère les deux formats : ObjectId (string ou ObjectId) ou objet peuplé
+   */
+  private isUserParticipantInChat(participants: any[], userId: string): boolean {
+    if (!participants || participants.length === 0) {
+      return false;
+    }
+
+    return participants.some((participant: any) => {
+      // Cas 1: Participant est un ObjectId (string ou Types.ObjectId)
+      if (typeof participant === 'string' || participant instanceof Types.ObjectId) {
+        return participant.toString() === userId;
+      }
+      
+      // Cas 2: Participant est un objet peuplé avec _id
+      if (participant && typeof participant === 'object') {
+        // Essayer _id d'abord (format Mongoose peuplé)
+        if (participant._id) {
+          return participant._id.toString() === userId;
+        }
+        // Essayer id comme fallback
+        if (participant.id) {
+          return participant.id.toString() === userId;
+        }
+        // Si c'est un ObjectId direct (sans _id)
+        if (participant.toString) {
+          return participant.toString() === userId;
+        }
+      }
+      
+      return false;
+    });
+  }
+
+  /**
    * Create a new chat (1-on-1 or group)
    */
   async create(createChatDto: CreateChatDto, userId: string): Promise<ChatDocument> {
@@ -180,12 +215,17 @@ export class ChatsService {
       throw new NotFoundException(`Chat with ID ${chatId} not found`);
     }
 
-    // Check if user is a participant
-    const isParticipant = chat.participants.some(
-      (p: any) => p._id.toString() === userId,
-    );
+    // Vérifier que les participants sont bien peuplés
+    if (chat.participants && chat.participants.length > 0) {
+      const firstParticipant = chat.participants[0] as any;
+      // Si le premier participant n'est pas peuplé, repeupler
+      if (!firstParticipant || (!firstParticipant._id && typeof firstParticipant !== 'string')) {
+        await chat.populate('participants', 'name email profileImageUrl');
+      }
+    }
 
-    if (!isParticipant) {
+    // Check if user is a participant (gère les deux formats)
+    if (!this.isUserParticipantInChat(chat.participants, userId)) {
       throw new ForbiddenException('You do not have access to this chat');
     }
 
@@ -416,10 +456,17 @@ export class ChatsService {
       );
     }
 
-    const participantObjectIds = participants.map((p) => p._id);
+    // Normaliser les participants : toujours stocker comme ObjectIds (pas comme objets)
+    const participantObjectIds = participants.map((p) => {
+      // S'assurer que c'est un ObjectId, pas un objet
+      if (p._id instanceof Types.ObjectId) {
+        return p._id;
+      }
+      return new Types.ObjectId(p._id.toString());
+    });
 
     const chatData: any = {
-      participants: participantObjectIds,
+      participants: participantObjectIds, // Toujours stocker comme ObjectIds
       isGroup: true,
       groupName: data.groupName,
       unreadCounts: new Map(),
@@ -471,19 +518,20 @@ export class ChatsService {
       throw new BadRequestException('Cannot leave a direct chat. This endpoint is only for group chats.');
     }
 
-    // 3. Vérifier que l'utilisateur est participant
-    const isParticipant = chat.participants.some(
-      (p: any) => {
-        const participantId = typeof p === 'string' ? p : (p._id ? p._id.toString() : p.toString());
-        return participantId === userId;
+    // 3. Peupler les participants si nécessaire
+    if (chat.participants && chat.participants.length > 0) {
+      const firstParticipant = chat.participants[0] as any;
+      if (!firstParticipant || (!firstParticipant._id && typeof firstParticipant !== 'string')) {
+        await chat.populate('participants', 'name email profileImageUrl');
       }
-    );
-    
-    if (!isParticipant) {
+    }
+
+    // 4. Vérifier que l'utilisateur est participant (gère les deux formats)
+    if (!this.isUserParticipantInChat(chat.participants, userId)) {
       throw new ForbiddenException('You are not a participant of this chat.');
     }
 
-    // 4. Retirer l'utilisateur de la liste des participants
+    // 5. Retirer l'utilisateur de la liste des participants
     chat.participants = chat.participants.filter(
       (p: any) => {
         const participantId = typeof p === 'string' 
@@ -493,7 +541,7 @@ export class ChatsService {
       }
     ) as Types.ObjectId[];
 
-    // 5. Si le groupe devient vide, supprimer le chat
+    // 6. Si le groupe devient vide, supprimer le chat
     if (chat.participants.length === 0) {
       await chat.deleteOne();
     } else {
@@ -526,20 +574,20 @@ export class ChatsService {
       throw new NotFoundException('Chat not found.');
     }
 
-    // 2. Vérifier que l'utilisateur est participant
-    // Gérer les cas où les participants sont peuplés ou non
-    const isParticipant = chat.participants.some(
-      (p: any) => {
-        const participantId = p._id ? p._id.toString() : (typeof p === 'string' ? p : p.toString());
-        return participantId === userId;
+    // 2. Vérifier que les participants sont peuplés
+    if (chat.participants && chat.participants.length > 0) {
+      const firstParticipant = chat.participants[0] as any;
+      if (!firstParticipant || (!firstParticipant._id && typeof firstParticipant !== 'string')) {
+        await chat.populate('participants', 'name email profileImageUrl');
       }
-    );
-    
-    if (!isParticipant) {
+    }
+
+    // 3. Vérifier que l'utilisateur est participant (gère les deux formats)
+    if (!this.isUserParticipantInChat(chat.participants, userId)) {
       throw new ForbiddenException('You are not a participant of this chat.');
     }
 
-    // 3. Filtrer les participants null/undefined et vérifier s'ils sont peuplés
+    // 4. Filtrer les participants null/undefined et vérifier s'ils sont peuplés
     const validParticipants = chat.participants.filter(p => p != null);
     
     // Vérifier si les participants sont déjà peuplés (ont _id et name)
