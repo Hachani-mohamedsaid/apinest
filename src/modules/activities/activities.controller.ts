@@ -14,6 +14,7 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
+import { Types } from 'mongoose';
 import { ActivitiesService } from './activities.service';
 import { ActivityMessagesService } from './activity-messages.service';
 import { ChatsService } from '../chats/chats.service';
@@ -226,29 +227,48 @@ export class ActivitiesController {
     }
 
     // 3. Vérifier si un chat de groupe existe déjà pour cette activité
-    const existingChat = await this.chatsService.findGroupChatByActivityId(
-      activityId,
-    );
+    let chat = await this.chatsService.findGroupChatByActivityId(activityId);
 
-    if (existingChat) {
-      // Retourner le chat existant
-      const validChatParticipants = (existingChat.participants || [])
-        .filter((p: any) => p != null && p._id)
+    if (chat) {
+      // Vérifier si l'utilisateur actuel est participant du chat
+      const isUserInChat = chat.participants.some((p: any) => {
+        const participantId = p._id ? p._id.toString() : (typeof p === 'string' ? p : p.toString());
+        return participantId === userId;
+      });
+
+      if (!isUserInChat) {
+        // Ajouter l'utilisateur actuel au chat existant
+        const userObjectId = new Types.ObjectId(userId);
+        chat.participants.push(userObjectId);
+        await chat.save();
+        
+        // Peupler les participants après l'ajout
+        await chat.populate('participants', 'name email profileImageUrl');
+      } else {
+        // S'assurer que les participants sont peuplés
+        if (!chat.participants[0] || typeof chat.participants[0] === 'string' || !(chat.participants[0] as any)._id) {
+          await chat.populate('participants', 'name email profileImageUrl');
+        }
+      }
+
+      // Mapper les participants pour la réponse
+      const validChatParticipants = (chat.participants || [])
+        .filter((p: any) => p != null && (p._id || typeof p === 'string'))
         .map((p: any) => ({
-          id: p._id.toString(),
+          id: p._id ? p._id.toString() : p.toString(),
           name: p.name || 'Unknown',
           profileImageUrl: p.profileImageUrl || null,
         }));
 
       return {
         chat: {
-          id: existingChat._id.toString(),
-          groupName: existingChat.groupName || (activity as any).title,
-          groupAvatar: existingChat.groupAvatar,
+          id: chat._id.toString(),
+          groupName: chat.groupName || (activity as any).title,
+          groupAvatar: chat.groupAvatar || null,
           participants: validChatParticipants,
           isGroup: true,
-          createdAt: (existingChat as any).createdAt.toISOString(),
-          updatedAt: (existingChat as any).updatedAt.toISOString(),
+          createdAt: (chat as any).createdAt.toISOString(),
+          updatedAt: (chat as any).updatedAt.toISOString(),
         },
         message: 'Chat de groupe existant',
       };
@@ -268,18 +288,28 @@ export class ActivitiesController {
     // 5. Créer le chat de groupe avec tous les participants
     // getActivityParticipants retourne des objets avec { id, name, profileImageUrl }
     const participantIds = participants.map((p: any) => p.id);
+    
+    // IMPORTANT: S'assurer que l'utilisateur actuel est inclus dans les participants
+    // Éliminer les doublons avec Set
+    const uniqueParticipantIds = Array.from(new Set([...participantIds, userId]));
 
     const newChat = await this.chatsService.createGroupChat({
-      participantIds,
+      participantIds: uniqueParticipantIds,
       groupName: (activity as any).title || `Groupe ${(activity as any).sportType}`,
       groupAvatar: null, // Optionnel : utiliser une image par défaut selon le sport
       activityId: activityId, // Lier le chat à l'activité
     });
 
+    // S'assurer que les participants sont peuplés
+    if (!newChat.participants[0] || typeof newChat.participants[0] === 'string' || !(newChat.participants[0] as any)._id) {
+      await newChat.populate('participants', 'name email profileImageUrl');
+    }
+
+    // Mapper les participants pour la réponse
     const validNewChatParticipants = (newChat.participants || [])
-      .filter((p: any) => p != null && p._id)
+      .filter((p: any) => p != null && (p._id || typeof p === 'string'))
       .map((p: any) => ({
-        id: p._id.toString(),
+        id: p._id ? p._id.toString() : p.toString(),
         name: p.name || 'Unknown',
         profileImageUrl: p.profileImageUrl || null,
       }));
