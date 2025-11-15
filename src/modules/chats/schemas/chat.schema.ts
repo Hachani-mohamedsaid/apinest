@@ -25,6 +25,9 @@ export class Chat {
 
   @Prop({ type: Map, of: Date, default: {} })
   lastReadAt: Map<string, Date>; // userId -> last read timestamp
+
+  @Prop({ type: Types.ObjectId, ref: 'Activity' })
+  activityId?: Types.ObjectId; // Lier le chat à une activité
 }
 
 export const ChatSchema = SchemaFactory.createForClass(Chat);
@@ -32,4 +35,5 @@ export const ChatSchema = SchemaFactory.createForClass(Chat);
 // Index for faster queries
 ChatSchema.index({ participants: 1 });
 ChatSchema.index({ lastMessage: 1 });
+ChatSchema.index({ activityId: 1 }); // Index pour les requêtes par activité
 

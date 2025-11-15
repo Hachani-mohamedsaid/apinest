@@ -9,6 +9,7 @@ import { ActivityRoomGateway } from './activity-room.gateway';
 import { Activity, ActivitySchema } from './schemas/activity.schema';
 import { ActivityMessage, ActivityMessageSchema } from './schemas/activity-message.schema';
 import { UsersModule } from '../users/users.module';
+import { ChatsModule } from '../chats/chats.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { UsersModule } from '../users/users.module';
       inject: [ConfigService],
     }),
     UsersModule,
+    ChatsModule,
   ],
   controllers: [ActivitiesController],
   providers: [

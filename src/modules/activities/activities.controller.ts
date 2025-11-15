@@ -9,13 +9,18 @@ import {
   UseGuards,
   Request,
   Query,
+  NotFoundException,
+  ForbiddenException,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { ActivitiesService } from './activities.service';
 import { ActivityMessagesService } from './activity-messages.service';
+import { ChatsService } from '../chats/chats.service';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { ActivityGroupChatResponseDto } from './dto/activity-group-chat-response.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('activities')
@@ -24,6 +29,7 @@ export class ActivitiesController {
   constructor(
     private readonly activitiesService: ActivitiesService,
     private readonly activityMessagesService: ActivityMessagesService,
+    private readonly chatsService: ChatsService,
   ) {}
 
   @Post()
@@ -180,6 +186,107 @@ export class ActivitiesController {
   async completeActivity(@Param('id') id: string, @Request() req) {
     const userId = req.user._id.toString();
     return this.activitiesService.completeActivity(id, userId);
+  }
+
+  @Post(':activityId/group-chat')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create or get group chat for an activity' })
+  @ApiResponse({
+    status: 200,
+    description: 'Group chat created or existing chat returned',
+    type: ActivityGroupChatResponseDto,
+  })
+  @ApiResponse({ status: 201, description: 'New group chat created' })
+  @ApiResponse({ status: 400, description: 'Invalid activity or no participants' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'User is not a participant of the activity' })
+  @ApiResponse({ status: 404, description: 'Activity not found' })
+  async createOrGetActivityGroupChat(
+    @Param('activityId') activityId: string,
+    @Request() req,
+  ): Promise<ActivityGroupChatResponseDto> {
+    const userId = req.user._id.toString();
+
+    // 1. Vérifier que l'activité existe
+    const activity = await this.activitiesService.findOne(activityId);
+    if (!activity) {
+      throw new NotFoundException('Activité non trouvée');
+    }
+
+    // 2. Vérifier que l'utilisateur est participant de l'activité
+    const isParticipant = await this.activitiesService.isUserParticipant(
+      activityId,
+      userId,
+    );
+    if (!isParticipant) {
+      throw new ForbiddenException(
+        'Vous devez être participant de l\'activité pour accéder au chat de groupe',
+      );
+    }
+
+    // 3. Vérifier si un chat de groupe existe déjà pour cette activité
+    const existingChat = await this.chatsService.findGroupChatByActivityId(
+      activityId,
+    );
+
+    if (existingChat) {
+      // Retourner le chat existant
+      return {
+        chat: {
+          id: existingChat._id.toString(),
+          groupName: existingChat.groupName || (activity as any).title,
+          groupAvatar: existingChat.groupAvatar,
+          participants: existingChat.participants.map((p: any) => ({
+            id: p._id.toString(),
+            name: p.name,
+            profileImageUrl: p.profileImageUrl,
+          })),
+          isGroup: true,
+          createdAt: (existingChat as any).createdAt.toISOString(),
+          updatedAt: (existingChat as any).updatedAt.toISOString(),
+        },
+        message: 'Chat de groupe existant',
+      };
+    }
+
+    // 4. Récupérer tous les participants de l'activité
+    const participants = await this.activitiesService.getActivityParticipants(
+      activityId,
+    );
+
+    if (participants.length === 0) {
+      throw new BadRequestException(
+        'Aucun participant trouvé pour cette activité',
+      );
+    }
+
+    // 5. Créer le chat de groupe avec tous les participants
+    const participantIds = participants.map((p: any) => p._id.toString());
+
+    const newChat = await this.chatsService.createGroupChat({
+      participantIds,
+      groupName: (activity as any).title || `Groupe ${(activity as any).sportType}`,
+      groupAvatar: null, // Optionnel : utiliser une image par défaut selon le sport
+      activityId: activityId, // Lier le chat à l'activité
+    });
+
+    return {
+      chat: {
+        id: newChat._id.toString(),
+        groupName: newChat.groupName,
+        groupAvatar: newChat.groupAvatar,
+        participants: newChat.participants.map((p: any) => ({
+          id: p._id.toString(),
+          name: p.name,
+          profileImageUrl: p.profileImageUrl,
+        })),
+        isGroup: true,
+        createdAt: (newChat as any).createdAt.toISOString(),
+        updatedAt: (newChat as any).updatedAt.toISOString(),
+      },
+      message: 'Chat de groupe créé avec succès',
+    };
   }
 }
 

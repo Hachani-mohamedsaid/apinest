@@ -263,5 +263,52 @@ export class ActivitiesService {
 
     return { message: 'Activity marked as complete' };
   }
+
+  async isUserParticipant(activityId: string, userId: string): Promise<boolean> {
+    const activity = await this.activityModel.findById(activityId).exec();
+    
+    if (!activity) {
+      return false;
+    }
+
+    // Vérifier si l'utilisateur est le créateur
+    if (activity.creator.toString() === userId) {
+      return true;
+    }
+
+    // Vérifier si l'utilisateur est dans la liste des participants
+    return activity.participantIds.some(
+      (p: any) => p.toString() === userId,
+    );
+  }
+
+  async getActivityParticipants(activityId: string): Promise<any[]> {
+    const activity = await this.activityModel
+      .findById(activityId)
+      .populate('participantIds', 'name email profileImageUrl')
+      .populate('creator', 'name email profileImageUrl')
+      .exec();
+    
+    if (!activity) {
+      return [];
+    }
+
+    // Inclure le créateur dans les participants
+    const allParticipants = [
+      activity.creator,
+      ...activity.participantIds,
+    ];
+
+    // Éliminer les doublons
+    const uniqueParticipantsMap = new Map();
+    allParticipants.forEach((p: any) => {
+      const id = p._id.toString();
+      if (!uniqueParticipantsMap.has(id)) {
+        uniqueParticipantsMap.set(id, p);
+      }
+    });
+
+    return Array.from(uniqueParticipantsMap.values());
+  }
 }
 

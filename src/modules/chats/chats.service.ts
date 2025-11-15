@@ -8,6 +8,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Chat, ChatDocument } from './schemas/chat.schema';
 import { Message, MessageDocument } from './schemas/message.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 
@@ -16,6 +17,7 @@ export class ChatsService {
   constructor(
     @InjectModel(Chat.name) private chatModel: Model<ChatDocument>,
     @InjectModel(Message.name) private messageModel: Model<MessageDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {}
 
   /**
@@ -343,6 +345,72 @@ export class ChatsService {
 
     // Format as date
     return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+  }
+
+  /**
+   * Find a group chat by activity ID
+   */
+  async findGroupChatByActivityId(activityId: string): Promise<ChatDocument | null> {
+    this.validateObjectId(activityId, 'Activity ID');
+    
+    return this.chatModel
+      .findOne({
+        activityId: new Types.ObjectId(activityId),
+        isGroup: true,
+      })
+      .populate('participants', 'name email profileImageUrl')
+      .exec();
+  }
+
+  /**
+   * Create a group chat with participants
+   */
+  async createGroupChat(data: {
+    participantIds: string[];
+    groupName: string;
+    groupAvatar?: string;
+    activityId?: string;
+  }): Promise<ChatDocument> {
+    // Validate all participant IDs
+    data.participantIds.forEach((id) => {
+      this.validateObjectId(id, 'Participant ID');
+    });
+
+    if (data.activityId) {
+      this.validateObjectId(data.activityId, 'Activity ID');
+    }
+
+    // Verify all participants exist
+    const participants = await this.userModel.find({
+      _id: { $in: data.participantIds.map(id => new Types.ObjectId(id)) },
+    });
+
+    if (participants.length !== data.participantIds.length) {
+      throw new BadRequestException('Some participants not found');
+    }
+
+    const participantObjectIds = participants.map((p) => p._id);
+
+    const chatData: any = {
+      participants: participantObjectIds,
+      isGroup: true,
+      groupName: data.groupName,
+      unreadCounts: new Map(),
+      lastReadAt: new Map(),
+    };
+
+    if (data.groupAvatar) {
+      chatData.groupAvatar = data.groupAvatar;
+    }
+
+    if (data.activityId) {
+      chatData.activityId = new Types.ObjectId(data.activityId);
+    }
+
+    const chat = new this.chatModel(chatData);
+    await chat.save();
+    
+    return chat.populate('participants', 'name email profileImageUrl');
   }
 }
 
