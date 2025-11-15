@@ -195,7 +195,7 @@ export class ActivitiesService {
     };
   }
 
-  async getParticipants(activityId: string) {
+  async getParticipantsDetails(activityId: string) {
     const activity = await this.activityModel
       .findById(activityId)
       .populate('participantIds', 'name profileImageUrl')
@@ -206,8 +206,17 @@ export class ActivitiesService {
       throw new NotFoundException('Activity not found');
     }
 
-    const creatorId = activity.creator.toString();
-    const participants = activity.participantIds.map((participant: any) => ({
+    const creatorId = activity.creator?.toString();
+    if (!creatorId) {
+      throw new NotFoundException('Activity creator not found');
+    }
+
+    // Filtrer les participants null/undefined et vérifier qu'ils ont un _id
+    const validParticipants = activity.participantIds.filter(
+      (participant: any) => participant && participant._id,
+    );
+
+    const participants = validParticipants.map((participant: any) => ({
       _id: participant._id,
       name: participant.name,
       profileImageUrl: participant.profileImageUrl,
@@ -282,6 +291,30 @@ export class ActivitiesService {
     );
   }
 
+  /**
+   * Extracts participant IDs from an ActivityDocument as an array of strings
+   * Handles null/undefined values and both ObjectId and string types
+   */
+  getParticipants(activity: ActivityDocument): string[] {
+    if (!activity.participantIds || activity.participantIds.length === 0) {
+      return [];
+    }
+
+    return activity.participantIds
+      .filter(p => p != null) // Filtrer les valeurs null/undefined
+      .map(p => {
+        // Gérer les cas où p est un ObjectId ou déjà une string
+        if (typeof p === 'string') {
+          return p;
+        }
+        if (p && p.toString) {
+          return p.toString();
+        }
+        return null;
+      })
+      .filter((id): id is string => id != null); // Filtrer les null restants
+  }
+
   async getActivityParticipants(activityId: string): Promise<any[]> {
     const activity = await this.activityModel
       .findById(activityId)
@@ -290,25 +323,48 @@ export class ActivitiesService {
       .exec();
     
     if (!activity) {
+      throw new NotFoundException('Activity not found');
+    }
+
+    if (!activity.participantIds || activity.participantIds.length === 0) {
       return [];
     }
 
-    // Inclure le créateur dans les participants
-    const allParticipants = [
-      activity.creator,
-      ...activity.participantIds,
-    ];
-
-    // Éliminer les doublons
-    const uniqueParticipantsMap = new Map();
-    allParticipants.forEach((p: any) => {
-      const id = p._id.toString();
-      if (!uniqueParticipantsMap.has(id)) {
-        uniqueParticipantsMap.set(id, p);
+    const participants: any[] = [];
+    
+    // Filtrer les participants null/undefined avant de les traiter
+    const validParticipants = activity.participantIds.filter(p => p != null);
+    
+    for (const participant of validParticipants) {
+      // Vérifier que le participant est bien peuplé (populated)
+      // Type assertion pour indiquer que c'est un objet peuplé, pas juste un ObjectId
+      const populatedParticipant = participant as any;
+      if (populatedParticipant && populatedParticipant._id) {
+        participants.push({
+          id: populatedParticipant._id.toString(),
+          name: populatedParticipant.name || 'Unknown',
+          profileImageUrl: populatedParticipant.profileImageUrl || null,
+        });
       }
-    });
+    }
 
-    return Array.from(uniqueParticipantsMap.values());
+    // Inclure le créateur dans les participants (si défini et pas déjà présent)
+    // Type assertion pour indiquer que le creator est peuplé
+    const populatedCreator = activity.creator as any;
+    if (populatedCreator && populatedCreator._id) {
+      const creatorId = populatedCreator._id.toString();
+      const isCreatorAlreadyIncluded = participants.some(p => p.id === creatorId);
+      
+      if (!isCreatorAlreadyIncluded) {
+        participants.unshift({
+          id: creatorId,
+          name: populatedCreator.name || 'Unknown',
+          profileImageUrl: populatedCreator.profileImageUrl || null,
+        });
+      }
+    }
+
+    return participants;
   }
 }
 

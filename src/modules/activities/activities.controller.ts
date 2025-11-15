@@ -159,7 +159,7 @@ export class ActivitiesController {
   @ApiResponse({ status: 404, description: 'Activity not found' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
   async getParticipants(@Param('id') id: string) {
-    return this.activitiesService.getParticipants(id);
+    return this.activitiesService.getParticipantsDetails(id);
   }
 
   @Post(':id/leave')
@@ -232,16 +232,20 @@ export class ActivitiesController {
 
     if (existingChat) {
       // Retourner le chat existant
+      const validChatParticipants = (existingChat.participants || [])
+        .filter((p: any) => p != null && p._id)
+        .map((p: any) => ({
+          id: p._id.toString(),
+          name: p.name || 'Unknown',
+          profileImageUrl: p.profileImageUrl || null,
+        }));
+
       return {
         chat: {
           id: existingChat._id.toString(),
           groupName: existingChat.groupName || (activity as any).title,
           groupAvatar: existingChat.groupAvatar,
-          participants: existingChat.participants.map((p: any) => ({
-            id: p._id.toString(),
-            name: p.name,
-            profileImageUrl: p.profileImageUrl,
-          })),
+          participants: validChatParticipants,
           isGroup: true,
           createdAt: (existingChat as any).createdAt.toISOString(),
           updatedAt: (existingChat as any).updatedAt.toISOString(),
@@ -262,7 +266,8 @@ export class ActivitiesController {
     }
 
     // 5. Créer le chat de groupe avec tous les participants
-    const participantIds = participants.map((p: any) => p._id.toString());
+    // getActivityParticipants retourne des objets avec { id, name, profileImageUrl }
+    const participantIds = participants.map((p: any) => p.id);
 
     const newChat = await this.chatsService.createGroupChat({
       participantIds,
@@ -271,16 +276,20 @@ export class ActivitiesController {
       activityId: activityId, // Lier le chat à l'activité
     });
 
+    const validNewChatParticipants = (newChat.participants || [])
+      .filter((p: any) => p != null && p._id)
+      .map((p: any) => ({
+        id: p._id.toString(),
+        name: p.name || 'Unknown',
+        profileImageUrl: p.profileImageUrl || null,
+      }));
+
     return {
       chat: {
         id: newChat._id.toString(),
         groupName: newChat.groupName,
         groupAvatar: newChat.groupAvatar,
-        participants: newChat.participants.map((p: any) => ({
-          id: p._id.toString(),
-          name: p.name,
-          profileImageUrl: p.profileImageUrl,
-        })),
+        participants: validNewChatParticipants,
         isGroup: true,
         createdAt: (newChat as any).createdAt.toISOString(),
         updatedAt: (newChat as any).updatedAt.toISOString(),
