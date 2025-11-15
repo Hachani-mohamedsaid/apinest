@@ -20,6 +20,7 @@ import {
 import { ChatsService } from './chats.service';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { ChatParticipantDto } from './dto/chat-participant.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('chats')
@@ -51,6 +52,33 @@ export class ChatsController {
   async findAll(@Query('search') searchQuery?: string, @Request() req?: any) {
     const userId = req.user._id.toString();
     return this.chatsService.findAll(userId, searchQuery);
+  }
+
+  @Get(':id/participants')
+  @ApiOperation({ summary: 'Get all participants of a chat' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Participants retrieved successfully',
+    type: [ChatParticipantDto]
+  })
+  @ApiResponse({ status: 403, description: 'Forbidden - Not a participant' })
+  @ApiResponse({ status: 404, description: 'Chat not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getParticipants(
+    @Param('id') chatId: string,
+    @Request() req,
+  ): Promise<ChatParticipantDto[]> {
+    const userId = req.user._id.toString();
+    
+    const participants = await this.chatsService.getParticipants(chatId, userId);
+    
+    return participants.map((p: any) => ({
+      id: p._id.toString(),
+      name: p.name || 'Unknown',
+      email: p.email || undefined,
+      profileImageUrl: p.profileImageUrl || undefined,
+      avatar: p.profileImageUrl || p.avatar || undefined,
+    }));
   }
 
   @Get(':id')
@@ -100,6 +128,26 @@ export class ChatsController {
   async markAsRead(@Param('id') id: string, @Request() req) {
     const userId = req.user._id.toString();
     return this.chatsService.markChatAsRead(id, userId);
+  }
+
+  @Delete(':id/leave')
+  @ApiOperation({ summary: 'Leave a group chat' })
+  @ApiResponse({ status: 200, description: 'Successfully left the group' })
+  @ApiResponse({ status: 400, description: 'Cannot leave a direct chat' })
+  @ApiResponse({ status: 403, description: 'Forbidden - Not a participant' })
+  @ApiResponse({ status: 404, description: 'Chat not found' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async leaveGroup(
+    @Param('id') chatId: string,
+    @Request() req,
+  ) {
+    const userId = req.user._id.toString();
+    
+    await this.chatsService.leaveGroup(chatId, userId);
+    
+    return {
+      message: 'Successfully left the group',
+    };
   }
 
   @Delete(':id')

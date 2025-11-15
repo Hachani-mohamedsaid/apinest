@@ -412,5 +412,127 @@ export class ChatsService {
     
     return chat.populate('participants', 'name email profileImageUrl');
   }
+
+  /**
+   * Quitter un groupe de chat
+   */
+  async leaveGroup(chatId: string, userId: string): Promise<void> {
+    this.validateObjectId(chatId, 'Chat ID');
+    this.validateObjectId(userId, 'User ID');
+
+    // 1. Récupérer le chat
+    const chat = await this.chatModel.findById(chatId).exec();
+    
+    if (!chat) {
+      throw new NotFoundException('Chat not found.');
+    }
+
+    // 2. Vérifier que c'est un groupe (pas un chat direct)
+    if (!chat.isGroup) {
+      throw new BadRequestException('Cannot leave a direct chat. This endpoint is only for group chats.');
+    }
+
+    // 3. Vérifier que l'utilisateur est participant
+    const isParticipant = chat.participants.some(
+      (p: any) => {
+        const participantId = typeof p === 'string' ? p : (p._id ? p._id.toString() : p.toString());
+        return participantId === userId;
+      }
+    );
+    
+    if (!isParticipant) {
+      throw new ForbiddenException('You are not a participant of this chat.');
+    }
+
+    // 4. Retirer l'utilisateur de la liste des participants
+    chat.participants = chat.participants.filter(
+      (p: any) => {
+        const participantId = typeof p === 'string' 
+          ? p 
+          : (p._id ? p._id.toString() : p.toString());
+        return participantId !== userId;
+      }
+    ) as Types.ObjectId[];
+
+    // 5. Si le groupe devient vide, supprimer le chat
+    if (chat.participants.length === 0) {
+      await chat.deleteOne();
+    } else {
+      // Retirer aussi de unreadCounts et lastReadAt si présents
+      if (chat.unreadCounts) {
+        chat.unreadCounts.delete(userId);
+      }
+      if (chat.lastReadAt) {
+        chat.lastReadAt.delete(userId);
+      }
+      // Sauvegarder les modifications
+      await chat.save();
+    }
+  }
+
+  /**
+   * Récupérer les participants d'un chat
+   */
+  async getParticipants(chatId: string, userId: string): Promise<UserDocument[]> {
+    this.validateObjectId(chatId, 'Chat ID');
+    this.validateObjectId(userId, 'User ID');
+
+    // 1. Récupérer le chat avec les participants peuplés
+    const chat = await this.chatModel
+      .findById(chatId)
+      .populate('participants', 'name email profileImageUrl')
+      .exec();
+    
+    if (!chat) {
+      throw new NotFoundException('Chat not found.');
+    }
+
+    // 2. Vérifier que l'utilisateur est participant
+    // Gérer les cas où les participants sont peuplés ou non
+    const isParticipant = chat.participants.some(
+      (p: any) => {
+        const participantId = p._id ? p._id.toString() : (typeof p === 'string' ? p : p.toString());
+        return participantId === userId;
+      }
+    );
+    
+    if (!isParticipant) {
+      throw new ForbiddenException('You are not a participant of this chat.');
+    }
+
+    // 3. Filtrer les participants null/undefined et vérifier s'ils sont peuplés
+    const validParticipants = chat.participants.filter(p => p != null);
+    
+    // Vérifier si les participants sont déjà peuplés (ont _id et name)
+    // Un participant peuplé aura une propriété 'name' (car on a fait populate avec 'name email profileImageUrl')
+    const firstParticipant = validParticipants[0] as any;
+    const isPopulated = firstParticipant && firstParticipant._id && firstParticipant.name !== undefined;
+    
+    if (isPopulated) {
+      // Les participants sont déjà peuplés, les filtrer pour s'assurer qu'ils sont valides
+      const populatedParticipants = validParticipants.filter((p: any) => 
+        p && p._id && p.name !== undefined
+      );
+      
+      // Cast via unknown pour éviter l'erreur TypeScript
+      // On sait que ces participants sont peuplés car on a vérifié qu'ils ont _id et name
+      return populatedParticipants as unknown as UserDocument[];
+    }
+
+    // Sinon, peupler les participants manuellement
+    const participantIds = validParticipants.map(p => {
+      if (typeof p === 'string') {
+        return p;
+      }
+      const participant = p as any;
+      return participant._id ? participant._id.toString() : p.toString();
+    });
+    
+    const participants = await this.userModel.find({
+      _id: { $in: participantIds.map(id => new Types.ObjectId(id)) }
+    }).exec();
+
+    return participants;
+  }
 }
 
