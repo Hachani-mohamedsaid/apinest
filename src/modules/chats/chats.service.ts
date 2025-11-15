@@ -353,13 +353,24 @@ export class ChatsService {
   async findGroupChatByActivityId(activityId: string): Promise<ChatDocument | null> {
     this.validateObjectId(activityId, 'Activity ID');
     
-    return this.chatModel
+    const chat = await this.chatModel
       .findOne({
         activityId: new Types.ObjectId(activityId),
         isGroup: true,
       })
       .populate('participants', 'name email profileImageUrl')
       .exec();
+    
+    // S'assurer que les participants sont bien peuplés
+    if (chat && chat.participants && chat.participants.length > 0) {
+      const firstParticipant = chat.participants[0] as any;
+      // Si le premier participant n'est pas peuplé (pas de _id ou pas de name), peupler à nouveau
+      if (!firstParticipant || !firstParticipant._id || firstParticipant.name === undefined) {
+        await chat.populate('participants', 'name email profileImageUrl');
+      }
+    }
+    
+    return chat;
   }
 
   /**
@@ -371,8 +382,20 @@ export class ChatsService {
     groupAvatar?: string;
     activityId?: string;
   }): Promise<ChatDocument> {
+    // Filtrer les IDs null/undefined/vides
+    const validParticipantIds = data.participantIds.filter(
+      (id) => id && typeof id === 'string' && id.trim().length > 0,
+    );
+
+    if (validParticipantIds.length === 0) {
+      throw new BadRequestException('At least one participant is required.');
+    }
+
+    // Éliminer les doublons
+    const uniqueParticipantIds = Array.from(new Set(validParticipantIds));
+
     // Validate all participant IDs
-    data.participantIds.forEach((id) => {
+    uniqueParticipantIds.forEach((id) => {
       this.validateObjectId(id, 'Participant ID');
     });
 
@@ -382,11 +405,15 @@ export class ChatsService {
 
     // Verify all participants exist
     const participants = await this.userModel.find({
-      _id: { $in: data.participantIds.map(id => new Types.ObjectId(id)) },
-    });
+      _id: { $in: uniqueParticipantIds.map(id => new Types.ObjectId(id)) },
+    }).exec();
 
-    if (participants.length !== data.participantIds.length) {
-      throw new BadRequestException('Some participants not found');
+    if (participants.length !== uniqueParticipantIds.length) {
+      const foundIds = participants.map(p => p._id.toString());
+      const missingIds = uniqueParticipantIds.filter(id => !foundIds.includes(id));
+      throw new BadRequestException(
+        `Some participants not found: ${missingIds.join(', ')}`
+      );
     }
 
     const participantObjectIds = participants.map((p) => p._id);
@@ -410,7 +437,19 @@ export class ChatsService {
     const chat = new this.chatModel(chatData);
     await chat.save();
     
-    return chat.populate('participants', 'name email profileImageUrl');
+    // Peupler les participants avant de retourner
+    const populatedChat = await chat.populate('participants', 'name email profileImageUrl');
+    
+    // Vérifier que le peuplement a fonctionné
+    if (populatedChat.participants && populatedChat.participants.length > 0) {
+      const firstParticipant = populatedChat.participants[0] as any;
+      if (!firstParticipant || !firstParticipant._id || firstParticipant.name === undefined) {
+        // Si le peuplement n'a pas fonctionné, réessayer
+        await populatedChat.populate('participants', 'name email profileImageUrl');
+      }
+    }
+    
+    return populatedChat;
   }
 
   /**
