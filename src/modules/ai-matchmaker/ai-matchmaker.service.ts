@@ -126,7 +126,7 @@ export class AIMatchmakerService {
         ? activity.time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
         : String(activity.time);
       
-      context += `${index + 1}. ID: ${activityId} - ${activity.title} (${activity.sportType}) - ${activity.location} - ${dateStr} ${timeStr} - Niveau: ${activity.level} - Participants: ${activity.participants}/${activity.participants || 10}\n`;
+      context += `${index + 1}. ID: ${activityId} - ${activity.title} (${activity.sportType}) - ${activity.location} - ${dateStr} ${timeStr} - Niveau: ${activity.level} - Participants: ${activity.participantIds?.length || 0}/${activity.participants || 10}\n`;
     });
 
     context += `\n\nVoici les utilisateurs disponibles:\n`;
@@ -210,7 +210,7 @@ export class AIMatchmakerService {
             location: activity.location,
             date: dateStr,
             time: timeStr,
-            participants: activity.participants || 0,
+            participants: activity.participantIds?.length || 0,
             maxParticipants: activity.participants || 10,
             level: activity.level,
             matchScore: 85 + Math.floor(Math.random() * 15), // Score entre 85 et 100
@@ -268,7 +268,7 @@ export class AIMatchmakerService {
             location: activity.location,
             date: dateStr,
             time: timeStr,
-            participants: activity.participants || 0,
+            participants: activity.participantIds?.length || 0,
             maxParticipants: activity.participants || 10,
             level: activity.level,
             matchScore: 80 + Math.floor(Math.random() * 15),
@@ -440,7 +440,7 @@ export class AIMatchmakerService {
             location: activity.location,
             date: dateStr,
             time: timeStr,
-            participants: activity.participants || 0,
+            participants: activity.participantIds?.length || 0,
             maxParticipants: activity.participants || 10,
             level: activity.level,
             matchScore: 80 + Math.floor(Math.random() * 15),
