@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { ActivityMessage, ActivityMessageDocument } from './schemas/activity-message.schema';
 import { Activity, ActivityDocument } from './schemas/activity.schema';
 
@@ -13,7 +13,20 @@ export class ActivityMessagesService {
     private activityModel: Model<ActivityDocument>,
   ) {}
 
+  /**
+   * Valide qu'un ID est un ObjectId MongoDB valide
+   * @param id L'ID à valider
+   * @throws BadRequestException si l'ID n'est pas valide
+   */
+  private validateObjectId(id: string): void {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid ID format: "${id}". Expected a valid MongoDB ObjectId.`);
+    }
+  }
+
   async getMessages(activityId: string) {
+    this.validateObjectId(activityId);
+    
     const activity = await this.activityModel.findById(activityId).exec();
     if (!activity) {
       throw new NotFoundException('Activity not found');
@@ -29,6 +42,8 @@ export class ActivityMessagesService {
   }
 
   async sendMessage(activityId: string, userId: string, content: string) {
+    this.validateObjectId(activityId);
+    
     const activity = await this.activityModel.findById(activityId).exec();
     if (!activity) {
       throw new NotFoundException('Activity not found');

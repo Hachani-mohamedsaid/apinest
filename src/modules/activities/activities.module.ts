@@ -8,14 +8,17 @@ import { ActivityMessagesService } from './activity-messages.service';
 import { ActivityRoomGateway } from './activity-room.gateway';
 import { Activity, ActivitySchema } from './schemas/activity.schema';
 import { ActivityMessage, ActivityMessageSchema } from './schemas/activity-message.schema';
+import { ActivityLog, ActivityLogSchema } from '../achievements/schemas/activity-log.schema';
 import { UsersModule } from '../users/users.module';
 import { ChatsModule } from '../chats/chats.module';
+import { AchievementsModule } from '../achievements/achievements.module';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Activity.name, schema: ActivitySchema },
       { name: ActivityMessage.name, schema: ActivityMessageSchema },
+      { name: ActivityLog.name, schema: ActivityLogSchema },
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],
@@ -26,6 +29,7 @@ import { ChatsModule } from '../chats/chats.module';
     }),
     UsersModule,
     ChatsModule,
+    AchievementsModule,
   ],
   controllers: [ActivitiesController],
   providers: [

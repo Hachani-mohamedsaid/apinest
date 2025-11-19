@@ -55,6 +55,19 @@ export class User {
 
   @Prop()
   resetPasswordExpires?: Date;
+
+  // Achievements System Fields
+  @Prop({ default: 0 })
+  totalXp?: number;
+
+  @Prop({ default: 1 })
+  currentLevel?: number;
+
+  @Prop({ default: 0 })
+  currentStreak?: number;
+
+  @Prop({ default: 0 })
+  bestStreak?: number;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

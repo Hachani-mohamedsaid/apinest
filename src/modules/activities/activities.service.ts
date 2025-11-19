@@ -5,16 +5,37 @@ import {
   BadRequestException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import { Activity, ActivityDocument } from './schemas/activity.schema';
 import { CreateActivityDto } from './dto/create-activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
+import { XpService } from '../achievements/services/xp.service';
+import { StreakService } from '../achievements/services/streak.service';
+import { BadgeService } from '../achievements/services/badge.service';
+import { ChallengeService } from '../achievements/services/challenge.service';
+import { ActivityLog, ActivityLogDocument } from '../achievements/schemas/activity-log.schema';
 
 @Injectable()
 export class ActivitiesService {
   constructor(
     @InjectModel(Activity.name) private activityModel: Model<ActivityDocument>,
+    @InjectModel(ActivityLog.name) private activityLogModel: Model<ActivityLogDocument>,
+    private readonly xpService: XpService,
+    private readonly streakService: StreakService,
+    private readonly badgeService: BadgeService,
+    private readonly challengeService: ChallengeService,
   ) {}
+
+  /**
+   * Valide qu'un ID est un ObjectId MongoDB valide
+   * @param id L'ID à valider
+   * @throws BadRequestException si l'ID n'est pas valide
+   */
+  private validateObjectId(id: string): void {
+    if (!Types.ObjectId.isValid(id)) {
+      throw new BadRequestException(`Invalid ID format: "${id}". Expected a valid MongoDB ObjectId.`);
+    }
+  }
 
   async create(createActivityDto: CreateActivityDto, userId: string): Promise<ActivityDocument> {
     // Combine date and time into a single datetime
@@ -30,7 +51,12 @@ export class ActivitiesService {
     const createdActivity = new this.activityModel(activityData);
     // Le créateur est automatiquement ajouté aux participants
     createdActivity.participantIds = [userId as any];
-    return createdActivity.save();
+    const savedActivity = await createdActivity.save();
+
+    // Award XP for hosting event
+    await this.xpService.addXp(userId, XpService.XP_REWARDS.HOST_EVENT, 'host_event');
+
+    return savedActivity;
   }
 
   async findAll(visibility?: string, userId?: string): Promise<ActivityDocument[]> {
@@ -65,6 +91,8 @@ export class ActivitiesService {
   }
 
   async findOne(id: string): Promise<ActivityDocument> {
+    this.validateObjectId(id);
+    
     const activity = await this.activityModel
       .findById(id)
       .populate('creator', 'name email profileImageUrl')
@@ -82,6 +110,8 @@ export class ActivitiesService {
     updateActivityDto: UpdateActivityDto,
     userId: string,
   ): Promise<ActivityDocument> {
+    this.validateObjectId(id);
+    
     const activity = await this.activityModel.findById(id).exec();
 
     if (!activity) {
@@ -115,6 +145,8 @@ export class ActivitiesService {
   }
 
   async remove(id: string, userId: string): Promise<void> {
+    this.validateObjectId(id);
+    
     const activity = await this.activityModel.findById(id).exec();
 
     if (!activity) {
@@ -156,6 +188,8 @@ export class ActivitiesService {
   }
 
   async joinActivity(activityId: string, userId: string) {
+    this.validateObjectId(activityId);
+    
     const activity = await this.activityModel.findById(activityId).exec();
     if (!activity) {
       throw new NotFoundException('Activity not found');
@@ -183,6 +217,9 @@ export class ActivitiesService {
     activity.participantIds.push(userId as any);
     await activity.save();
 
+    // Award XP for joining event
+    await this.xpService.addXp(userId, XpService.XP_REWARDS.JOIN_EVENT, 'join_event');
+
     const updatedActivity = await this.activityModel
       .findById(activityId)
       .populate('creator', 'name email profileImageUrl')
@@ -196,6 +233,8 @@ export class ActivitiesService {
   }
 
   async getParticipantsDetails(activityId: string) {
+    this.validateObjectId(activityId);
+    
     const activity = await this.activityModel
       .findById(activityId)
       .populate('participantIds', 'name profileImageUrl')
@@ -228,6 +267,8 @@ export class ActivitiesService {
   }
 
   async leaveActivity(activityId: string, userId: string) {
+    this.validateObjectId(activityId);
+    
     const activity = await this.activityModel.findById(activityId).exec();
     if (!activity) {
       throw new NotFoundException('Activity not found');
@@ -256,6 +297,8 @@ export class ActivitiesService {
   }
 
   async completeActivity(activityId: string, userId: string) {
+    this.validateObjectId(activityId);
+    
     const activity = await this.activityModel.findById(activityId).exec();
     if (!activity) {
       throw new NotFoundException('Activity not found');
@@ -270,10 +313,65 @@ export class ActivitiesService {
     activity.isCompleted = true;
     await activity.save();
 
+    // Create activity log for all participants
+    const participants = activity.participantIds || [];
+    const activityDate = activity.date || activity.time || new Date();
+    const isHost = activity.creator.toString() === userId;
+
+    // Log activity for each participant
+    for (const participantId of participants) {
+      const participantIdStr = participantId.toString();
+      const participantIsHost = participantIdStr === activity.creator.toString();
+
+      // Create activity log
+      await this.activityLogModel.create({
+        userId: participantId,
+        activityType: activity.sportType,
+        activityName: activity.title,
+        date: activityDate,
+        xpEarned: XpService.XP_REWARDS.COMPLETE_ACTIVITY,
+        isHost: participantIsHost,
+        participantsCount: participants.length,
+      });
+
+      // Award XP for completing activity
+      await this.xpService.addXp(
+        participantIdStr,
+        XpService.XP_REWARDS.COMPLETE_ACTIVITY,
+        'complete_activity',
+      );
+
+      // Update streak
+      await this.streakService.updateStreak(participantIdStr, activityDate);
+
+      // Check badges
+      await this.badgeService.checkAndAwardBadges(participantIdStr, 'activity_complete', {
+        activity: {
+          sportType: activity.sportType,
+          date: activityDate,
+          isHost: participantIsHost,
+        },
+      });
+
+      // Activate challenges for user (if not already activated)
+      await this.challengeService.activateChallengesForUser(participantIdStr);
+
+      // Update challenges
+      await this.challengeService.updateChallengeProgress(participantIdStr, 'complete_activity', {
+        activity: {
+          sportType: activity.sportType,
+          date: activityDate,
+          time: activity.time,
+        },
+      });
+    }
+
     return { message: 'Activity marked as complete' };
   }
 
   async isUserParticipant(activityId: string, userId: string): Promise<boolean> {
+    this.validateObjectId(activityId);
+    
     const activity = await this.activityModel.findById(activityId).exec();
     
     if (!activity) {
@@ -316,6 +414,8 @@ export class ActivitiesService {
   }
 
   async getActivityParticipants(activityId: string): Promise<any[]> {
+    this.validateObjectId(activityId);
+    
     const activity = await this.activityModel
       .findById(activityId)
       .populate('participantIds', 'name email profileImageUrl')

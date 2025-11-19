@@ -8,6 +8,7 @@ import { ActivitiesModule } from './modules/activities/activities.module';
 import { ChatsModule } from './modules/chats/chats.module';
 import { QuickMatchModule } from './modules/quick-match/quick-match.module';
 import { AIMatchmakerModule } from './modules/ai-matchmaker/ai-matchmaker.module';
+import { AchievementsModule } from './modules/achievements/achievements.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -41,6 +42,7 @@ import { HealthController } from './health.controller';
     ChatsModule,
     QuickMatchModule,
     AIMatchmakerModule,
+    AchievementsModule,
   ],
   controllers: [HealthController],
 })

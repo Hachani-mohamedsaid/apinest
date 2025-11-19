@@ -10,15 +10,16 @@ export class MailService {
 
   constructor(private configService: ConfigService) {
     const sendGridApiKey = this.configService.get<string>('SENDGRID_API_KEY');
-    const fromEmail = this.configService.get<string>('SENDGRID_FROM_EMAIL') || 
-                      this.configService.get<string>('GMAIL_USER') || 
-                      'noreply@fitness-api.com';
 
     // Vérifier que SendGrid est configuré
     if (!sendGridApiKey) {
-      this.logger.warn('⚠️ SendGrid API key not configured. Email sending will fail.');
-      this.logger.warn('Please set SENDGRID_API_KEY environment variable.');
-      this.logger.warn('Falling back to Gmail SMTP (may have timeout issues on Railway)...');
+      if (process.env.NODE_ENV === 'production') {
+        this.logger.warn('⚠️ SendGrid API key not configured. Email sending will fail in production.');
+        this.logger.warn('Please set SENDGRID_API_KEY environment variable on Railway.');
+      } else {
+        this.logger.warn('⚠️ SendGrid API key not configured. Email sending will be logged in development mode.');
+        this.logger.warn('Please set SENDGRID_API_KEY environment variable in your .env file.');
+      }
     } else {
       // Configuration SendGrid
       sgMail.setApiKey(sendGridApiKey);
