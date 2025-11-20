@@ -296,7 +296,12 @@ export class ActivitiesService {
     return { message: 'Successfully left activity' };
   }
 
-  async completeActivity(activityId: string, userId: string) {
+  async completeActivity(
+    activityId: string,
+    userId: string,
+    durationMinutes?: number,
+    distanceKm?: number,
+  ) {
     this.validateObjectId(activityId);
     
     const activity = await this.activityModel.findById(activityId).exec();
@@ -316,52 +321,62 @@ export class ActivitiesService {
     // Create activity log for all participants
     const participants = activity.participantIds || [];
     const activityDate = activity.date || activity.time || new Date();
-    const isHost = activity.creator.toString() === userId;
+    const defaultDuration = durationMinutes || 30; // Durée par défaut de 30 minutes si non fournie
+    const defaultDistance = distanceKm || 0;
 
     // Log activity for each participant
     for (const participantId of participants) {
       const participantIdStr = participantId.toString();
       const participantIsHost = participantIdStr === activity.creator.toString();
 
-      // Create activity log
+      // Calculer l'XP selon la formule détaillée
+      const xpEarned = this.xpService.calculateActivityXp(
+        activity.sportType,
+        defaultDuration,
+        defaultDistance > 0 ? defaultDistance : undefined,
+      );
+
+      // Create activity log with detailed information
       await this.activityLogModel.create({
         userId: participantId,
         activityType: activity.sportType,
         activityName: activity.title,
         date: activityDate,
-        xpEarned: XpService.XP_REWARDS.COMPLETE_ACTIVITY,
+        xpEarned,
         isHost: participantIsHost,
         participantsCount: participants.length,
+        durationMinutes: defaultDuration,
+        distanceKm: defaultDistance,
       });
 
-      // Award XP for completing activity
-      await this.xpService.addXp(
-        participantIdStr,
-        XpService.XP_REWARDS.COMPLETE_ACTIVITY,
-        'complete_activity',
-      );
+      // Award XP for completing activity (avec le calcul détaillé)
+      await this.xpService.addXp(participantIdStr, xpEarned, 'complete_activity');
 
       // Update streak
       await this.streakService.updateStreak(participantIdStr, activityDate);
 
-      // Check badges
+      // Check badges (peut débloquer des badges et donner de l'XP bonus)
       await this.badgeService.checkAndAwardBadges(participantIdStr, 'activity_complete', {
         activity: {
           sportType: activity.sportType,
           date: activityDate,
           isHost: participantIsHost,
+          durationMinutes: defaultDuration,
+          distanceKm: defaultDistance,
         },
       });
 
       // Activate challenges for user (if not already activated)
       await this.challengeService.activateChallengesForUser(participantIdStr);
 
-      // Update challenges
+      // Update challenges (avec les informations détaillées)
       await this.challengeService.updateChallengeProgress(participantIdStr, 'complete_activity', {
         activity: {
           sportType: activity.sportType,
           date: activityDate,
           time: activity.time,
+          durationMinutes: defaultDuration,
+          distanceKm: defaultDistance,
         },
       });
     }

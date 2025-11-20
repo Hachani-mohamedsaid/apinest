@@ -46,6 +46,7 @@ import { UsersModule } from '../users/users.module';
     ChallengeService,
     LeaderboardService,
   ],
+  // Les services sont déjà disponibles via exports, mais on doit s'assurer que les dépendances circulaires sont gérées
   exports: [
     XpService,
     StreakService,

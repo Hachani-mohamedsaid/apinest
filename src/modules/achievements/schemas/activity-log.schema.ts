@@ -9,7 +9,7 @@ export class ActivityLog {
   userId: Types.ObjectId;
 
   @Prop({ required: true })
-  activityType: string; // e.g., 'running', 'swimming', 'yoga'
+  activityType: string; // e.g., 'Running', 'Swimming', 'Yoga'
 
   @Prop({ required: true })
   activityName: string;
@@ -25,6 +25,19 @@ export class ActivityLog {
 
   @Prop({ default: 1 })
   participantsCount: number;
+
+  // Champs additionnels pour le calcul détaillé d'XP
+  @Prop({ default: 0 })
+  durationMinutes: number; // Durée de l'activité en minutes
+
+  @Prop({ default: 0 })
+  distanceKm: number; // Distance parcourue en kilomètres (optionnel)
+
+  @Prop()
+  caloriesBurned?: number; // Calories brûlées (optionnel)
+
+  @Prop()
+  averageHeartRate?: number; // Fréquence cardiaque moyenne (optionnel)
 }
 
 export const ActivityLogSchema = SchemaFactory.createForClass(ActivityLog);

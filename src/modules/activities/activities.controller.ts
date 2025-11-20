@@ -22,6 +22,7 @@ import { CreateActivityDto } from './dto/create-activity.dto';
 import { UpdateActivityDto } from './dto/update-activity.dto';
 import { SendMessageDto } from './dto/send-message.dto';
 import { ActivityGroupChatResponseDto } from './dto/activity-group-chat-response.dto';
+import { CompleteActivityDto } from './dto/complete-activity.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 
 @ApiTags('activities')
@@ -184,9 +185,18 @@ export class ActivitiesController {
   @ApiResponse({ status: 403, description: 'Only host can mark as complete' })
   @ApiResponse({ status: 404, description: 'Activity not found' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
-  async completeActivity(@Param('id') id: string, @Request() req) {
+  async completeActivity(
+    @Param('id') id: string,
+    @Body() completeActivityDto: CompleteActivityDto,
+    @Request() req,
+  ) {
     const userId = req.user._id.toString();
-    return this.activitiesService.completeActivity(id, userId);
+    return this.activitiesService.completeActivity(
+      id,
+      userId,
+      completeActivityDto.durationMinutes,
+      completeActivityDto.distanceKm,
+    );
   }
 
   @Post(':activityId/group-chat')

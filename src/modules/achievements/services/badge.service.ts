@@ -1,4 +1,4 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { BadgeDefinition, BadgeDefinitionDocument } from '../schemas/badge-definition.schema';
@@ -71,6 +71,12 @@ export class BadgeService {
         case 'activity_count':
           return await this.checkActivityCount(userId, criteria);
 
+        case 'distance_total':
+          return await this.checkDistanceTotal(userId, criteria);
+
+        case 'duration_total':
+          return await this.checkDurationTotal(userId, criteria);
+
         case 'social_connections':
           return await this.checkSocialConnections(userId, criteria);
 
@@ -79,6 +85,9 @@ export class BadgeService {
 
         case 'host_events':
           return await this.checkHostEvents(userId, criteria);
+
+        case 'combined':
+          return await this.checkCombinedCriteria(userId, criteria);
 
         default:
           this.logger.warn(`Unknown badge criteria type: ${criteriaType}`);
@@ -141,6 +150,71 @@ export class BadgeService {
       .countDocuments({ userId, isHost: true })
       .exec();
     return count >= requiredCount;
+  }
+
+  /**
+   * Check total distance criteria
+   */
+  private async checkDistanceTotal(userId: string, criteria: Record<string, any>): Promise<boolean> {
+    const requiredDistance = criteria.km || 0;
+    const activityType = criteria.activity_type;
+
+    const query: any = { userId };
+    if (activityType && activityType !== 'any') {
+      query.activityType = activityType;
+    }
+
+    const result = await this.activityLogModel.aggregate([
+      { $match: query },
+      { $group: { _id: null, totalDistance: { $sum: '$distanceKm' } } },
+    ]).exec();
+
+    const totalDistance = result.length > 0 ? result[0].totalDistance || 0 : 0;
+    return totalDistance >= requiredDistance;
+  }
+
+  /**
+   * Check total duration criteria
+   */
+  private async checkDurationTotal(userId: string, criteria: Record<string, any>): Promise<boolean> {
+    const requiredDuration = criteria.minutes || 0;
+    const activityType = criteria.activity_type;
+
+    const query: any = { userId };
+    if (activityType && activityType !== 'any') {
+      query.activityType = activityType;
+    }
+
+    const result = await this.activityLogModel.aggregate([
+      { $match: query },
+      { $group: { _id: null, totalDuration: { $sum: '$durationMinutes' } } },
+    ]).exec();
+
+    const totalDuration = result.length > 0 ? result[0].totalDuration || 0 : 0;
+    return totalDuration >= requiredDuration;
+  }
+
+  /**
+   * Check combined criteria (all must be met)
+   */
+  private async checkCombinedCriteria(
+    userId: string,
+    criteria: Record<string, any>,
+  ): Promise<boolean> {
+    const subCriteria = criteria.criteria || [];
+    if (!Array.isArray(subCriteria) || subCriteria.length === 0) {
+      return false;
+    }
+
+    // Tous les critères doivent être remplis
+    for (const subCriterion of subCriteria) {
+      const isMet = await this.checkBadgeCriteria(userId, subCriterion);
+      if (!isMet) {
+        return false;
+      }
+    }
+
+    return true;
   }
 
   /**
@@ -236,6 +310,28 @@ export class BadgeService {
         }
         currentProgress = await this.activityLogModel.countDocuments(query).exec();
         target = criteria.count || 0;
+      } else if (criteria.type === 'distance_total') {
+        const query: any = { userId };
+        if (criteria.activity_type && criteria.activity_type !== 'any') {
+          query.activityType = criteria.activity_type;
+        }
+        const result = await this.activityLogModel.aggregate([
+          { $match: query },
+          { $group: { _id: null, totalDistance: { $sum: '$distanceKm' } } },
+        ]).exec();
+        currentProgress = result.length > 0 ? Math.round(result[0].totalDistance || 0) : 0;
+        target = criteria.km || 0;
+      } else if (criteria.type === 'duration_total') {
+        const query: any = { userId };
+        if (criteria.activity_type && criteria.activity_type !== 'any') {
+          query.activityType = criteria.activity_type;
+        }
+        const result = await this.activityLogModel.aggregate([
+          { $match: query },
+          { $group: { _id: null, totalDuration: { $sum: '$durationMinutes' } } },
+        ]).exec();
+        currentProgress = result.length > 0 ? Math.round(result[0].totalDuration || 0) : 0;
+        target = criteria.minutes || 0;
       } else if (criteria.type === 'streak_days') {
         const streak = await this.streakModel.findOne({ userId }).exec();
         currentProgress = streak ? streak.currentStreak || 0 : 0;

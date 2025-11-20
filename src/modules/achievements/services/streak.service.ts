@@ -1,9 +1,11 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import { Cron, CronExpression } from '@nestjs/schedule';
 import { User, UserDocument } from '../../users/schemas/user.schema';
 import { UserStreak, UserStreakDocument } from '../schemas/user-streak.schema';
 import { XpService } from './xp.service';
+import { BadgeService } from './badge.service';
 
 @Injectable()
 export class StreakService {
@@ -13,6 +15,8 @@ export class StreakService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     @InjectModel(UserStreak.name) private readonly streakModel: Model<UserStreakDocument>,
     private readonly xpService: XpService,
+    @Inject(forwardRef(() => BadgeService))
+    private readonly badgeService: BadgeService,
   ) {}
 
   /**
@@ -85,6 +89,11 @@ export class StreakService {
           await this.xpService.addXp(userId, bonusXp, 'streak_bonus');
           this.logger.log(`User ${userId} streak: ${newStreak} days, awarded ${bonusXp} XP bonus`);
         }
+
+        // Vérifier les badges de série après la mise à jour
+        await this.badgeService.checkAndAwardBadges(userId, 'streak_updated', {
+          streak: newStreak,
+        });
       } else if (daysDifference > 1) {
         // Streak broken - reset to 1
         streak.currentStreak = 1;
@@ -137,6 +146,70 @@ export class StreakService {
   private getDaysDifference(date1: Date, date2: Date): number {
     const diffTime = date2.getTime() - date1.getTime();
     return Math.floor(diffTime / (1000 * 60 * 60 * 24));
+  }
+
+  /**
+   * Check and expire streaks for users who haven't been active for more than 1 day
+   * Runs daily at midnight
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async expireStreaks(): Promise<void> {
+    try {
+      const now = new Date();
+      const yesterday = new Date(now);
+      yesterday.setDate(yesterday.getDate() - 1);
+      yesterday.setHours(23, 59, 59, 999);
+
+      // Find all users with active streaks (currentStreak > 0)
+      const activeStreaks = await this.streakModel
+        .find({ currentStreak: { $gt: 0 } })
+        .exec();
+
+      let expiredCount = 0;
+
+      for (const streak of activeStreaks) {
+        const lastActivityDate = streak.lastActivityDate;
+        
+        if (!lastActivityDate) {
+          // Pas de date d'activité = streak invalide, remettre à 0
+          streak.currentStreak = 0;
+          await streak.save();
+          
+          await this.userModel.findByIdAndUpdate(streak.userId, {
+            currentStreak: 0,
+          }).exec();
+          
+          expiredCount++;
+          continue;
+        }
+
+        // Vérifier si la dernière activité date d'avant-hier ou plus
+        const normalizedLastActivity = this.normalizeToDay(lastActivityDate);
+        const normalizedYesterday = this.normalizeToDay(yesterday);
+        const daysSinceLastActivity = this.getDaysDifference(normalizedLastActivity, normalizedYesterday);
+
+        // Si 2+ jours sans activité, la série est cassée
+        if (daysSinceLastActivity >= 2) {
+          streak.currentStreak = 0;
+          await streak.save();
+
+          await this.userModel.findByIdAndUpdate(streak.userId, {
+            currentStreak: 0,
+          }).exec();
+
+          expiredCount++;
+          this.logger.log(
+            `Expired streak for user ${streak.userId.toString()}, last activity: ${lastActivityDate}`,
+          );
+        }
+      }
+
+      if (expiredCount > 0) {
+        this.logger.log(`Expired ${expiredCount} streaks at midnight check`);
+      }
+    } catch (error) {
+      this.logger.error(`Error expiring streaks: ${error.message}`);
+    }
   }
 }
 

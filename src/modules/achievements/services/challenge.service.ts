@@ -94,8 +94,14 @@ export class ChallengeService {
           continue;
         }
 
-        // Update progress
-        userChallenge.currentProgress = (userChallenge.currentProgress || 0) + 1;
+        // Update progress based on challenge type
+        const progressIncrement = await this.calculateProgressIncrement(
+          actionType,
+          challenge.unlockCriteria,
+          context,
+        );
+
+        userChallenge.currentProgress = (userChallenge.currentProgress || 0) + progressIncrement;
         await userChallenge.save();
 
         // Check if challenge is completed
@@ -109,6 +115,65 @@ export class ChallengeService {
   }
 
   /**
+   * Calculate how much progress to add based on challenge criteria
+   */
+  async calculateProgressIncrement(
+    actionType: string,
+    criteria: Record<string, any>,
+    context?: Record<string, any>,
+  ): Promise<number> {
+    const criteriaType = criteria.type;
+
+    try {
+      // Handle social connections separately (not related to activities)
+      if (criteriaType === 'social_connections') {
+        return actionType === 'new_connection' ? 1 : 0;
+      }
+
+      // For activity-related challenges, we need activity context
+      if (actionType !== 'complete_activity' || !context || !context.activity) {
+        return 0;
+      }
+
+      const activity = context.activity;
+
+      switch (criteriaType) {
+        case 'activities_in_period':
+        case 'activity_count':
+          // For activity count challenges, add 1 per activity
+          return 1;
+
+        case 'distance_in_period':
+        case 'distance_total':
+          // For distance challenges, add the distance of the activity
+          return activity.distanceKm || 0;
+
+        case 'duration_in_period':
+        case 'duration_total':
+          // For duration challenges, add the duration of the activity
+          return activity.durationMinutes || 0;
+
+        case 'sport_specific':
+          // For specific sport challenges, check if it matches
+          const requiredSport = criteria.sportType;
+          if (activity.sportType === requiredSport) {
+            return 1;
+          }
+          return 0;
+
+        case 'sport_variety':
+          return 1;
+
+        default:
+          return 0;
+      }
+    } catch (error) {
+      this.logger.error(`Error calculating progress increment: ${error.message}`);
+      return 0;
+    }
+  }
+
+  /**
    * Check if an action counts toward challenge criteria
    */
   async doesActionCount(
@@ -116,26 +181,8 @@ export class ChallengeService {
     criteria: Record<string, any>,
     context?: Record<string, any>,
   ): Promise<boolean> {
-    const criteriaType = criteria.type;
-
-    try {
-      switch (criteriaType) {
-        case 'activities_in_period':
-          return await this.checkActivitiesInPeriod(actionType, criteria, context);
-
-        case 'sport_variety':
-          return await this.checkSportVariety(actionType, criteria, context);
-
-        case 'social_connections':
-          return actionType === 'new_connection';
-
-        default:
-          return false;
-      }
-    } catch (error) {
-      this.logger.error(`Error checking if action counts: ${error.message}`);
-      return false;
-    }
+    const increment = await this.calculateProgressIncrement(actionType, criteria, context);
+    return increment > 0;
   }
 
   /**
