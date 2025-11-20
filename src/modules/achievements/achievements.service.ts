@@ -132,5 +132,63 @@ export class AchievementsService {
       totalPages: leaderboardData.totalPages,
     };
   }
+
+  /**
+   * Initialize achievements for a new user
+   * Called when a new user is created
+   */
+  async initializeUserAchievements(userId: string): Promise<void> {
+    try {
+      this.logger.log(`Initializing achievements for user ${userId}`);
+
+      // Initialize user streak if needed (streak service handles it automatically)
+      // Ensure user has default values
+      const user = await this.userModel.findById(userId).exec();
+      if (!user) {
+        this.logger.warn(`User ${userId} not found when initializing achievements`);
+        return;
+      }
+
+      // Activate challenges for the user (this creates initial challenges)
+      await this.challengeService.activateChallengesForUser(userId);
+
+      this.logger.log(`Achievements initialized for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Error initializing achievements for user ${userId}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Called when an activity is completed
+   * This method orchestrates all achievement-related updates
+   */
+  async onActivityCompleted(
+    userId: string,
+    activityData: {
+      sportType: string;
+      date?: Date;
+      durationMinutes?: number;
+      distanceKm?: number;
+      isHost?: boolean;
+    },
+  ): Promise<void> {
+    try {
+      this.logger.log(`Processing activity completion for user ${userId}`);
+
+      // This is already handled in ActivitiesService.completeActivity()
+      // But we keep this method for consistency and future use
+      // The actual work is done by:
+      // 1. XpService.addXp() - Already called
+      // 2. StreakService.updateStreak() - Already called
+      // 3. BadgeService.checkAndAwardBadges() - Already called
+      // 4. ChallengeService.updateChallengeProgress() - Already called
+
+      this.logger.log(`Activity completion processed for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Error processing activity completion for user ${userId}: ${error.message}`);
+      throw error;
+    }
+  }
 }
 

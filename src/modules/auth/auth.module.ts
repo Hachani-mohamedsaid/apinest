@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { PassportModule } from '@nestjs/passport';
 import { ConfigModule, ConfigService } from '@nestjs/config';
@@ -7,11 +7,13 @@ import { AuthService } from './auth.service';
 import { JwtStrategy } from './jwt.strategy';
 import { UsersModule } from '../users/users.module';
 import { MailModule } from '../mail/mail.module';
+import { AchievementsModule } from '../achievements/achievements.module';
 
 @Module({
   imports: [
     UsersModule,
     MailModule,
+    forwardRef(() => AchievementsModule), // Permet l'injection de AchievementsService
     PassportModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],

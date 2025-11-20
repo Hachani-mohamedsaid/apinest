@@ -48,6 +48,7 @@ import { UsersModule } from '../users/users.module';
   ],
   // Les services sont déjà disponibles via exports, mais on doit s'assurer que les dépendances circulaires sont gérées
   exports: [
+    AchievementsService, // Exporter AchievementsService pour l'utiliser dans AuthModule
     XpService,
     StreakService,
     BadgeService,

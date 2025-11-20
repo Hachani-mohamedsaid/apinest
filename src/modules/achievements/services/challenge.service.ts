@@ -2,13 +2,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Cron, CronExpression } from '@nestjs/schedule';
-import { ChallengeDefinition, ChallengeDefinitionDocument } from '../schemas/challenge-definition.schema';
+import { ChallengeDefinition, ChallengeDefinitionDocument, ChallengeType } from '../schemas/challenge-definition.schema';
 import {
   UserChallenge,
   UserChallengeDocument,
   ChallengeStatus,
 } from '../schemas/user-challenge.schema';
 import { ActivityLog, ActivityLogDocument } from '../schemas/activity-log.schema';
+import { User, UserDocument } from '../../users/schemas/user.schema';
 import { XpService } from './xp.service';
 import { BadgeService } from './badge.service';
 
@@ -23,6 +24,8 @@ export class ChallengeService {
     private readonly userChallengeModel: Model<UserChallengeDocument>,
     @InjectModel(ActivityLog.name)
     private readonly activityLogModel: Model<ActivityLogDocument>,
+    @InjectModel(User.name)
+    private readonly userModel: Model<UserDocument>,
     private readonly xpService: XpService,
     private readonly badgeService: BadgeService,
   ) {}
@@ -364,6 +367,178 @@ export class ChallengeService {
       }
     } catch (error) {
       this.logger.error(`Error expiring challenges: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create daily challenges for all active users
+   * Runs every day at midnight
+   */
+  @Cron(CronExpression.EVERY_DAY_AT_MIDNIGHT)
+  async createDailyChallenges(): Promise<void> {
+    try {
+      this.logger.log('Creating daily challenges for all users...');
+
+      // Find or create daily challenge definition
+      const now = new Date();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      tomorrow.setHours(23, 59, 59, 999);
+
+      // Check if daily challenge definition exists
+      let dailyChallengeDef = await this.challengeDefinitionModel
+        .findOne({
+          name: 'Défi Quotidien',
+          challengeType: ChallengeType.DAILY,
+          isActive: true,
+        })
+        .exec();
+
+      if (!dailyChallengeDef) {
+        // Create daily challenge definition
+        dailyChallengeDef = await this.challengeDefinitionModel.create({
+          name: 'Défi Quotidien',
+          description: "Compléter 2 activités aujourd'hui",
+          challengeType: ChallengeType.DAILY,
+          xpReward: 200,
+          targetCount: 2,
+          unlockCriteria: {
+            type: 'activities_in_period',
+            period: 'day',
+            count: 2,
+          },
+          startDate: now,
+          endDate: tomorrow,
+          isActive: true,
+        });
+
+        this.logger.log('Daily challenge definition created');
+      }
+
+      // Get all users (you might want to filter for active users only)
+      const users = await this.userModel.find({}).select('_id').exec();
+
+      let activatedCount = 0;
+      for (const user of users) {
+        await this.activateChallengesForUser(user._id.toString());
+        activatedCount++;
+      }
+
+      this.logger.log(`Daily challenges activated for ${activatedCount} users`);
+    } catch (error) {
+      this.logger.error(`Error creating daily challenges: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create weekly challenges for all active users
+   * Runs every Monday at midnight
+   */
+  @Cron('0 0 * * 1') // Every Monday at midnight
+  async createWeeklyChallenges(): Promise<void> {
+    try {
+      this.logger.log('Creating weekly challenges for all users...');
+
+      const now = new Date();
+      const nextMonday = new Date(now);
+      const daysUntilMonday = (8 - now.getDay()) % 7 || 7;
+      nextMonday.setDate(now.getDate() + daysUntilMonday);
+      nextMonday.setHours(23, 59, 59, 999);
+
+      let weeklyChallengeDef = await this.challengeDefinitionModel
+        .findOne({
+          name: 'Défi Hebdomadaire',
+          challengeType: ChallengeType.WEEKLY,
+          isActive: true,
+        })
+        .exec();
+
+      if (!weeklyChallengeDef) {
+        weeklyChallengeDef = await this.challengeDefinitionModel.create({
+          name: 'Défi Hebdomadaire',
+          description: 'Compléter 5 activités cette semaine',
+          challengeType: ChallengeType.WEEKLY,
+          xpReward: 500,
+          targetCount: 5,
+          unlockCriteria: {
+            type: 'activities_in_period',
+            period: 'week',
+            count: 5,
+          },
+          startDate: now,
+          endDate: nextMonday,
+          isActive: true,
+        });
+
+        this.logger.log('Weekly challenge definition created');
+      }
+
+      const users = await this.userModel.find({}).select('_id').exec();
+
+      let activatedCount = 0;
+      for (const user of users) {
+        await this.activateChallengesForUser(user._id.toString());
+        activatedCount++;
+      }
+
+      this.logger.log(`Weekly challenges activated for ${activatedCount} users`);
+    } catch (error) {
+      this.logger.error(`Error creating weekly challenges: ${error.message}`);
+    }
+  }
+
+  /**
+   * Create monthly challenges for all active users
+   * Runs on the 1st of each month at midnight
+   */
+  @Cron('0 0 1 * *') // 1st of each month at midnight
+  async createMonthlyChallenges(): Promise<void> {
+    try {
+      this.logger.log('Creating monthly challenges for all users...');
+
+      const now = new Date();
+      const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
+      nextMonth.setHours(23, 59, 59, 999);
+
+      let monthlyChallengeDef = await this.challengeDefinitionModel
+        .findOne({
+          name: 'Marathon Mensuel',
+          challengeType: ChallengeType.MONTHLY,
+          isActive: true,
+        })
+        .exec();
+
+      if (!monthlyChallengeDef) {
+        monthlyChallengeDef = await this.challengeDefinitionModel.create({
+          name: 'Marathon Mensuel',
+          description: 'Compléter 20 activités ce mois',
+          challengeType: ChallengeType.MONTHLY,
+          xpReward: 1500,
+          targetCount: 20,
+          unlockCriteria: {
+            type: 'activities_in_period',
+            period: 'month',
+            count: 20,
+          },
+          startDate: now,
+          endDate: nextMonth,
+          isActive: true,
+        });
+
+        this.logger.log('Monthly challenge definition created');
+      }
+
+      const users = await this.userModel.find({}).select('_id').exec();
+
+      let activatedCount = 0;
+      for (const user of users) {
+        await this.activateChallengesForUser(user._id.toString());
+        activatedCount++;
+      }
+
+      this.logger.log(`Monthly challenges activated for ${activatedCount} users`);
+    } catch (error) {
+      this.logger.error(`Error creating monthly challenges: ${error.message}`);
     }
   }
 }

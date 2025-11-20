@@ -3,10 +3,13 @@ import {
   UnauthorizedException,
   ConflictException,
   BadRequestException,
+  Inject,
+  forwardRef,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UsersService } from '../users/users.service';
 import { MailService } from '../mail/mail.service';
+import { AchievementsService } from '../achievements/achievements.service';
 import { RegisterDto } from './dto/register.dto';
 import { LoginDto } from './dto/login.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
@@ -19,6 +22,8 @@ import { ConfigService } from '@nestjs/config';
 @Injectable()
 export class AuthService {
   constructor(
+    @Inject(forwardRef(() => AchievementsService))
+    private readonly achievementsService: AchievementsService,
     private usersService: UsersService,
     private jwtService: JwtService,
     private mailService: MailService,
@@ -70,6 +75,14 @@ export class AuthService {
       name: registerDto.name,
       location: registerDto.location,
     });
+    
+    // Initialiser les achievements pour le nouvel utilisateur
+    try {
+      await this.achievementsService.initializeUserAchievements(user._id.toString());
+    } catch (error) {
+      // Log l'erreur mais ne bloque pas l'inscription
+      console.error(`Error initializing achievements for user ${user._id}: ${error.message}`);
+    }
     
     const userObj = user.toObject();
     const { password, ...result } = userObj;
