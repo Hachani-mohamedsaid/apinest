@@ -679,27 +679,16 @@ export class ChallengeService {
     try {
       this.logger.log('Creating daily challenges for all users...');
 
-      // Find or create daily challenge definition
       const now = new Date();
       const tomorrow = new Date(now);
       tomorrow.setDate(tomorrow.getDate() + 1);
       tomorrow.setHours(23, 59, 59, 999);
 
-      // Check if daily challenge definition exists
-      let dailyChallengeDef = await this.challengeDefinitionModel
-        .findOne({
-          name: 'Défi Quotidien',
-          challengeType: ChallengeType.DAILY,
-          isActive: true,
-        })
-        .exec();
-
-      if (!dailyChallengeDef) {
-        // Create daily challenge definition
-        dailyChallengeDef = await this.challengeDefinitionModel.create({
+      // Liste des challenges quotidiens à créer
+      const dailyChallenges = [
+        {
           name: 'Défi Quotidien',
           description: "Compléter 2 activités aujourd'hui",
-          challengeType: ChallengeType.DAILY,
           xpReward: 200,
           targetCount: 2,
           unlockCriteria: {
@@ -707,17 +696,72 @@ export class ChallengeService {
             period: 'day',
             count: 2,
           },
-          startDate: now,
-          endDate: tomorrow,
-          isActive: true,
-        });
+        },
+        {
+          name: 'Marcheur du Jour',
+          description: "Parcourir 5 km aujourd'hui",
+          xpReward: 150,
+          targetCount: 5,
+          unlockCriteria: {
+            type: 'distance_in_period',
+            period: 'day',
+            km: 5,
+          },
+        },
+        {
+          name: 'Endurance Quotidienne',
+          description: "Accumuler 60 minutes d'activité aujourd'hui",
+          xpReward: 180,
+          targetCount: 60,
+          unlockCriteria: {
+            type: 'duration_in_period',
+            period: 'day',
+            minutes: 60,
+          },
+        },
+        {
+          name: 'Créateur Actif',
+          description: "Créer 1 activité aujourd'hui",
+          xpReward: 100,
+          targetCount: 1,
+          unlockCriteria: {
+            type: 'activities_in_period',
+            period: 'day',
+            count: 1,
+            action: 'create', // Compter les créations, pas les complétions
+          },
+        },
+      ];
 
-        this.logger.log('Daily challenge definition created');
+      // Créer ou mettre à jour chaque challenge quotidien
+      for (const challengeData of dailyChallenges) {
+        let challengeDef = await this.challengeDefinitionModel
+          .findOne({
+            name: challengeData.name,
+            challengeType: ChallengeType.DAILY,
+            isActive: true,
+          })
+          .exec();
+
+        if (!challengeDef) {
+          challengeDef = await this.challengeDefinitionModel.create({
+            ...challengeData,
+            challengeType: ChallengeType.DAILY,
+            startDate: now,
+            endDate: tomorrow,
+            isActive: true,
+          });
+          this.logger.log(`Daily challenge "${challengeData.name}" created`);
+        } else {
+          // Mettre à jour les dates pour le nouveau jour
+          challengeDef.startDate = now;
+          challengeDef.endDate = tomorrow;
+          await challengeDef.save();
+        }
       }
 
-      // Get all users (you might want to filter for active users only)
+      // Activer les challenges pour tous les utilisateurs
       const users = await this.userModel.find({}).select('_id').exec();
-
       let activatedCount = 0;
       for (const user of users) {
         await this.activateChallengesForUser(user._id.toString());
@@ -745,19 +789,11 @@ export class ChallengeService {
       nextMonday.setDate(now.getDate() + daysUntilMonday);
       nextMonday.setHours(23, 59, 59, 999);
 
-      let weeklyChallengeDef = await this.challengeDefinitionModel
-        .findOne({
-          name: 'Défi Hebdomadaire',
-          challengeType: ChallengeType.WEEKLY,
-          isActive: true,
-        })
-        .exec();
-
-      if (!weeklyChallengeDef) {
-        weeklyChallengeDef = await this.challengeDefinitionModel.create({
+      // Liste des challenges hebdomadaires à créer
+      const weeklyChallenges = [
+        {
           name: 'Défi Hebdomadaire',
           description: 'Compléter 5 activités cette semaine',
-          challengeType: ChallengeType.WEEKLY,
           xpReward: 500,
           targetCount: 5,
           unlockCriteria: {
@@ -765,16 +801,93 @@ export class ChallengeService {
             period: 'week',
             count: 5,
           },
-          startDate: now,
-          endDate: nextMonday,
-          isActive: true,
-        });
+        },
+        {
+          name: 'Coureur de la Semaine',
+          description: 'Parcourir 25 km cette semaine',
+          xpReward: 600,
+          targetCount: 25,
+          unlockCriteria: {
+            type: 'distance_in_period',
+            period: 'week',
+            km: 25,
+          },
+        },
+        {
+          name: 'Sportif Régulier',
+          description: 'Accumuler 300 minutes d\'activité cette semaine',
+          xpReward: 550,
+          targetCount: 300,
+          unlockCriteria: {
+            type: 'duration_in_period',
+            period: 'week',
+            minutes: 300,
+          },
+        },
+        {
+          name: 'Variété Sportive',
+          description: 'Pratiquer 3 sports différents cette semaine',
+          xpReward: 400,
+          targetCount: 3,
+          unlockCriteria: {
+            type: 'sport_variety',
+            period: 'week',
+            unique_sports: 3,
+          },
+        },
+        {
+          name: 'Weekend Actif',
+          description: 'Compléter 2 activités pendant le weekend',
+          xpReward: 300,
+          targetCount: 2,
+          unlockCriteria: {
+            type: 'activities_in_period',
+            period: 'weekend',
+            count: 2,
+          },
+        },
+        {
+          name: 'Organisateur de la Semaine',
+          description: 'Créer 3 activités cette semaine',
+          xpReward: 350,
+          targetCount: 3,
+          unlockCriteria: {
+            type: 'activities_in_period',
+            period: 'week',
+            count: 3,
+            action: 'create',
+          },
+        },
+      ];
 
-        this.logger.log('Weekly challenge definition created');
+      // Créer ou mettre à jour chaque challenge hebdomadaire
+      for (const challengeData of weeklyChallenges) {
+        let challengeDef = await this.challengeDefinitionModel
+          .findOne({
+            name: challengeData.name,
+            challengeType: ChallengeType.WEEKLY,
+            isActive: true,
+          })
+          .exec();
+
+        if (!challengeDef) {
+          challengeDef = await this.challengeDefinitionModel.create({
+            ...challengeData,
+            challengeType: ChallengeType.WEEKLY,
+            startDate: now,
+            endDate: nextMonday,
+            isActive: true,
+          });
+          this.logger.log(`Weekly challenge "${challengeData.name}" created`);
+        } else {
+          // Mettre à jour les dates pour la nouvelle semaine
+          challengeDef.startDate = now;
+          challengeDef.endDate = nextMonday;
+          await challengeDef.save();
+        }
       }
 
       const users = await this.userModel.find({}).select('_id').exec();
-
       let activatedCount = 0;
       for (const user of users) {
         await this.activateChallengesForUser(user._id.toString());
@@ -800,19 +913,11 @@ export class ChallengeService {
       const nextMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1);
       nextMonth.setHours(23, 59, 59, 999);
 
-      let monthlyChallengeDef = await this.challengeDefinitionModel
-        .findOne({
-          name: 'Marathon Mensuel',
-          challengeType: ChallengeType.MONTHLY,
-          isActive: true,
-        })
-        .exec();
-
-      if (!monthlyChallengeDef) {
-        monthlyChallengeDef = await this.challengeDefinitionModel.create({
+      // Liste des challenges mensuels à créer
+      const monthlyChallenges = [
+        {
           name: 'Marathon Mensuel',
           description: 'Compléter 20 activités ce mois',
-          challengeType: ChallengeType.MONTHLY,
           xpReward: 1500,
           targetCount: 20,
           unlockCriteria: {
@@ -820,16 +925,82 @@ export class ChallengeService {
             period: 'month',
             count: 20,
           },
-          startDate: now,
-          endDate: nextMonth,
-          isActive: true,
-        });
+        },
+        {
+          name: 'Explorateur Mensuel',
+          description: 'Parcourir 100 km ce mois',
+          xpReward: 2000,
+          targetCount: 100,
+          unlockCriteria: {
+            type: 'distance_in_period',
+            period: 'month',
+            km: 100,
+          },
+        },
+        {
+          name: 'Endurance Mensuelle',
+          description: 'Accumuler 1200 minutes d\'activité ce mois',
+          xpReward: 1800,
+          targetCount: 1200,
+          unlockCriteria: {
+            type: 'duration_in_period',
+            period: 'month',
+            minutes: 1200,
+          },
+        },
+        {
+          name: 'Maître Organisateur',
+          description: 'Créer 10 activités ce mois',
+          xpReward: 1200,
+          targetCount: 10,
+          unlockCriteria: {
+            type: 'activities_in_period',
+            period: 'month',
+            count: 10,
+            action: 'create',
+          },
+        },
+        {
+          name: 'Polyvalent Mensuel',
+          description: 'Pratiquer 5 sports différents ce mois',
+          xpReward: 1000,
+          targetCount: 5,
+          unlockCriteria: {
+            type: 'sport_variety',
+            period: 'month',
+            unique_sports: 5,
+          },
+        },
+      ];
 
-        this.logger.log('Monthly challenge definition created');
+      // Créer ou mettre à jour chaque challenge mensuel
+      for (const challengeData of monthlyChallenges) {
+        let challengeDef = await this.challengeDefinitionModel
+          .findOne({
+            name: challengeData.name,
+            challengeType: ChallengeType.MONTHLY,
+            isActive: true,
+          })
+          .exec();
+
+        if (!challengeDef) {
+          challengeDef = await this.challengeDefinitionModel.create({
+            ...challengeData,
+            challengeType: ChallengeType.MONTHLY,
+            startDate: now,
+            endDate: nextMonth,
+            isActive: true,
+          });
+          this.logger.log(`Monthly challenge "${challengeData.name}" created`);
+        } else {
+          // Mettre à jour les dates pour le nouveau mois
+          challengeDef.startDate = now;
+          challengeDef.endDate = nextMonth;
+          await challengeDef.save();
+        }
       }
 
       const users = await this.userModel.find({}).select('_id').exec();
-
       let activatedCount = 0;
       for (const user of users) {
         await this.activateChallengesForUser(user._id.toString());
