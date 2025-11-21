@@ -41,6 +41,19 @@ export class ActivitiesService {
   }
 
   async create(createActivityDto: CreateActivityDto, userId: string): Promise<ActivityDocument> {
+    this.logger.log(
+      `[ActivitiesService] ========================================`,
+    );
+    this.logger.log(
+      `[ActivitiesService] 🎯 CREATE ACTIVITY called for user ${userId}`,
+    );
+    this.logger.log(
+      `[ActivitiesService] Activity data: sportType=${createActivityDto.sportType}, title=${createActivityDto.title}`,
+    );
+    this.logger.log(
+      `[ActivitiesService] ========================================`,
+    );
+    
     // Combine date and time into a single datetime
     const activityDateTime = this.combineDateAndTime(createActivityDto.date, createActivityDto.time);
 
@@ -55,6 +68,10 @@ export class ActivitiesService {
     // Le créateur est automatiquement ajouté aux participants
     createdActivity.participantIds = [userId as any];
     const savedActivity = await createdActivity.save();
+    
+    this.logger.log(
+      `[ActivitiesService] ✅ Activity created successfully: id=${savedActivity._id}, title="${savedActivity.title}"`,
+    );
 
     // Award XP for hosting event
     await this.xpService.addXp(userId, XpService.XP_REWARDS.HOST_EVENT, 'host_event');

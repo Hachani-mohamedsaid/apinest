@@ -41,7 +41,16 @@ export class BadgeService {
   ): Promise<void> {
     try {
       this.logger.log(
+        `[BadgeService] ========================================`,
+      );
+      this.logger.log(
         `[BadgeService] Checking badges for user ${userId}, triggerType: ${triggerType}`,
+      );
+      this.logger.log(
+        `[BadgeService] Context: ${JSON.stringify(context)}`,
+      );
+      this.logger.log(
+        `[BadgeService] ========================================`,
       );
       
       // Get all active badges
@@ -51,21 +60,59 @@ export class BadgeService {
         `[BadgeService] Found ${badges.length} active badges to check`,
       );
 
-      for (const badge of badges) {
-        this.logger.debug(
-          `[BadgeService] Checking badge: "${badge.name}" (id: ${badge._id}, criteriaType: ${badge.unlockCriteria?.type})`,
+      // Filter badges that match the trigger type
+      // For 'activity_created', check badges with criteria type 'activity_creation_count' or 'host_events'
+      // For 'activity_complete', check badges with criteria type 'activity_count', 'distance_total', 'duration_total', etc.
+      const relevantBadges = badges.filter((badge) => {
+        const criteriaType = badge.unlockCriteria?.type;
+        
+        if (triggerType === 'activity_created') {
+          return criteriaType === 'activity_creation_count' || criteriaType === 'host_events';
+        } else if (triggerType === 'activity_complete') {
+          return criteriaType === 'activity_count' || 
+                 criteriaType === 'distance_total' || 
+                 criteriaType === 'duration_total' ||
+                 criteriaType === 'streak_days';
+        }
+        
+        // For other trigger types, check all badges
+        return true;
+      });
+
+      this.logger.log(
+        `[BadgeService] Found ${relevantBadges.length} relevant badges for triggerType: ${triggerType}`,
+      );
+
+      let badgesAwarded = 0;
+
+      for (const badge of relevantBadges) {
+        this.logger.log(
+          `[BadgeService] ----------------------------------------`,
+        );
+        this.logger.log(
+          `[BadgeService] Checking badge: "${badge.name}" (id: ${badge._id})`,
+        );
+        this.logger.log(
+          `[BadgeService] Criteria type: ${badge.unlockCriteria?.type}`,
+        );
+        this.logger.log(
+          `[BadgeService] Criteria: ${JSON.stringify(badge.unlockCriteria)}`,
         );
         
         // Skip if user already has this badge
         const hasBadge = await this.userHasBadge(userId, badge._id.toString());
         if (hasBadge) {
-          this.logger.debug(
-            `[BadgeService] User ${userId} already has badge "${badge.name}", skipping`,
+          this.logger.log(
+            `[BadgeService] ⏭️ User ${userId} already has badge "${badge.name}", skipping`,
           );
           continue;
         }
 
         // Check if badge criteria is met
+        this.logger.log(
+          `[BadgeService] Checking if criteria is met for badge "${badge.name}"...`,
+        );
+        
         const criteriaMet = await this.checkBadgeCriteria(userId, badge.unlockCriteria, context);
         
         this.logger.log(
@@ -76,16 +123,36 @@ export class BadgeService {
           this.logger.log(
             `[BadgeService] 🎉 Criteria met! Awarding badge "${badge.name}" to user ${userId}`,
           );
-          await this.awardBadge(userId, badge._id.toString());
+          try {
+            await this.awardBadge(userId, badge._id.toString());
+            badgesAwarded++;
+            this.logger.log(
+              `[BadgeService] ✅ Badge "${badge.name}" successfully awarded!`,
+            );
+          } catch (awardError) {
+            this.logger.error(
+              `[BadgeService] ❌ Error awarding badge "${badge.name}": ${awardError.message}`,
+              awardError.stack,
+            );
+          }
         } else {
-          this.logger.debug(
-            `[BadgeService] Criteria not met for badge "${badge.name}"`,
+          this.logger.log(
+            `[BadgeService] ⚠️ Criteria not met for badge "${badge.name}"`,
           );
         }
       }
       
       this.logger.log(
+        `[BadgeService] ========================================`,
+      );
+      this.logger.log(
         `[BadgeService] ✅ Badge check completed for user ${userId}`,
+      );
+      this.logger.log(
+        `[BadgeService] 🏆 Total badges awarded: ${badgesAwarded}`,
+      );
+      this.logger.log(
+        `[BadgeService] ========================================`,
       );
     } catch (error) {
       this.logger.error(
