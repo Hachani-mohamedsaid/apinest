@@ -12,6 +12,8 @@ import { ActivityLog, ActivityLogDocument } from '../schemas/activity-log.schema
 import { User, UserDocument } from '../../users/schemas/user.schema';
 import { XpService } from './xp.service';
 import { BadgeService } from './badge.service';
+import { NotificationService } from './notification.service';
+import { NotificationType } from '../schemas/notification.schema';
 
 @Injectable()
 export class ChallengeService {
@@ -28,6 +30,7 @@ export class ChallengeService {
     private readonly userModel: Model<UserDocument>,
     private readonly xpService: XpService,
     private readonly badgeService: BadgeService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -142,24 +145,53 @@ export class ChallengeService {
 
       switch (criteriaType) {
         case 'activities_in_period':
+          // For period-based challenges, verify the activity is in the correct period
+          const periodMatches = await this.checkActivitiesInPeriod(actionType, criteria, context);
+          if (!periodMatches) {
+            return 0;
+          }
+          // If period matches, add 1 per activity
+          return 1;
+
         case 'activity_count':
-          // For activity count challenges, add 1 per activity
+          // For activity count challenges (no period restriction), add 1 per activity
           return 1;
 
         case 'distance_in_period':
+          // For distance challenges with period, verify period first
+          const distancePeriodMatches = await this.checkActivitiesInPeriod(actionType, criteria, context);
+          if (!distancePeriodMatches) {
+            return 0;
+          }
+          return activity.distanceKm || 0;
+
         case 'distance_total':
-          // For distance challenges, add the distance of the activity
+          // For total distance challenges (no period restriction), add the distance
           return activity.distanceKm || 0;
 
         case 'duration_in_period':
+          // For duration challenges with period, verify period first
+          const durationPeriodMatches = await this.checkActivitiesInPeriod(actionType, criteria, context);
+          if (!durationPeriodMatches) {
+            return 0;
+          }
+          return activity.durationMinutes || 0;
+
         case 'duration_total':
-          // For duration challenges, add the duration of the activity
+          // For total duration challenges (no period restriction), add the duration
           return activity.durationMinutes || 0;
 
         case 'sport_specific':
           // For specific sport challenges, check if it matches
           const requiredSport = criteria.sportType;
           if (activity.sportType === requiredSport) {
+            // Also check period if specified
+            if (criteria.period) {
+              const sportPeriodMatches = await this.checkActivitiesInPeriod(actionType, criteria, context);
+              if (!sportPeriodMatches) {
+                return 0;
+              }
+            }
             return 1;
           }
           return 0;
@@ -190,6 +222,7 @@ export class ChallengeService {
 
   /**
    * Check activities in period criteria
+   * Verifies if an activity matches the period requirement (day, week, month, etc.)
    */
   private async checkActivitiesInPeriod(
     actionType: string,
@@ -205,33 +238,47 @@ export class ChallengeService {
     }
 
     const activity = context.activity;
-    const period = criteria.period;
+    const period = criteria.period || criteria.challengeType; // Support both 'period' and 'challengeType'
     const activityTypes = criteria.activity_types || ['any'];
 
-    // Check activity type
-    if (!activityTypes.includes('any') && !activityTypes.includes(activity.sportType)) {
+    // Check activity type if specified
+    if (activityTypes && !activityTypes.includes('any') && !activityTypes.includes(activity.sportType)) {
       return false;
     }
 
-    // Check period
-    const activityDate = new Date(activity.date || activity.time);
+    // Get activity date
+    const activityDate = new Date(activity.date || activity.time || new Date());
     const now = new Date();
 
-    if (period === 'weekend') {
-      const day = activityDate.getDay();
-      return day === 0 || day === 6; // Saturday or Sunday
-    } else if (period === 'week') {
+    // Check period based on challenge type or period field
+    if (period === 'day' || period === 'daily' || period === 'today') {
+      // Daily challenge: activity must be from today
+      const today = new Date(now);
+      today.setHours(0, 0, 0, 0);
+      const activityDay = new Date(activityDate);
+      activityDay.setHours(0, 0, 0, 0);
+      return activityDay.getTime() === today.getTime();
+    } else if (period === 'week' || period === 'weekly') {
+      // Weekly challenge: activity must be from current week
       const weekStart = new Date(now);
-      weekStart.setDate(now.getDate() - now.getDay());
+      weekStart.setDate(now.getDate() - now.getDay()); // Sunday
       weekStart.setHours(0, 0, 0, 0);
-      return activityDate >= weekStart;
-    } else if (period === 'month') {
+      const activityDay = new Date(activityDate);
+      activityDay.setHours(0, 0, 0, 0);
+      return activityDay >= weekStart;
+    } else if (period === 'month' || period === 'monthly') {
+      // Monthly challenge: activity must be from current month
       return (
         activityDate.getMonth() === now.getMonth() &&
         activityDate.getFullYear() === now.getFullYear()
       );
+    } else if (period === 'weekend') {
+      // Weekend challenge: activity must be on Saturday or Sunday
+      const day = activityDate.getDay();
+      return day === 0 || day === 6;
     }
 
+    // If no period specified or period is 'any', accept all activities
     return true;
   }
 
@@ -282,6 +329,23 @@ export class ChallengeService {
           userChallenge.userId.toString(),
           challenge.badgeRewardId.toString(),
         );
+      }
+
+      // Create notification for challenge completion
+      try {
+        await this.notificationService.createNotification(
+          userChallenge.userId.toString(),
+          NotificationType.CHALLENGE_COMPLETED,
+          '🎯 Défi Complété !',
+          `Félicitations ! Vous avez complété le défi "${challenge.name}" et gagné ${challenge.xpReward} XP !`,
+          {
+            challengeId: challenge._id.toString(),
+            challengeName: challenge.name,
+            xpReward: challenge.xpReward || 0,
+          },
+        );
+      } catch (error) {
+        this.logger.warn(`Failed to create challenge completion notification: ${error.message}`);
       }
 
       this.logger.log(
