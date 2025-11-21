@@ -75,13 +75,10 @@ export class QuickMatchService {
       return { profiles: [], total: 0, page, totalPages: 0 };
     }
 
-    // 6. Récupérer les IDs des profils déjà likés, passés ou matchés
-    const [likedProfiles, passedProfiles, matchedProfiles] = await Promise.all([
+    // 6. Récupérer les IDs des profils déjà likés ou matchés
+    // NOTE: On n'exclut PAS les profils passés pour permettre de les revoir
+    const [likedProfiles, matchedProfiles] = await Promise.all([
       this.likeModel
-        .find({ fromUser: new Types.ObjectId(userId) })
-        .select('toUser')
-        .exec(),
-      this.passModel
         .find({ fromUser: new Types.ObjectId(userId) })
         .select('toUser')
         .exec(),
@@ -97,8 +94,9 @@ export class QuickMatchService {
     ]);
 
     const excludedUserIds = new Set<string>();
+    // Exclure seulement les profils déjà likés
     likedProfiles.forEach((like) => excludedUserIds.add(like.toUser.toString()));
-    passedProfiles.forEach((pass) => excludedUserIds.add(pass.toUser.toString()));
+    // Exclure les profils avec lesquels on a déjà matché
     matchedProfiles.forEach((match) => {
       excludedUserIds.add(
         match.user1.toString() === userId
@@ -106,6 +104,8 @@ export class QuickMatchService {
           : match.user1.toString(),
       );
     });
+    // NOTE: On n'exclut PAS les profils passés pour permettre de les revoir
+    // Cela permet d'avoir plus de profils disponibles et de ne pas bloquer l'utilisateur
 
     // Construire la liste des IDs à exclure
     const excludedUserIdsArray = Array.from(excludedUserIds);
