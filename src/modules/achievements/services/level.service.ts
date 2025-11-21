@@ -52,15 +52,19 @@ export class LevelService implements OnModuleInit {
 
   /**
    * Calculate XP needed for next level
-   * Formula: 100 + (level * 50)
-   * Level 1→2: 100, Level 2→3: 150, Level 3→4: 200, etc.
+   * Simple formula: 150 XP per level
+   * Level 1→2: 150, Level 2→3: 150, Level 3→4: 150, etc.
    */
   private getXpForNextLevel(level: number): number {
-    return 100 + level * 50;
+    return 150;
   }
 
   /**
-   * Calculate level from total XP
+   * Calculate level from total XP using simple formula
+   * Formula: floor(totalXp / 150) + 1
+   * - Niveau 1 : 0-149 XP
+   * - Niveau 2 : 150-299 XP
+   * - Niveau 3 : 300-499 XP
    * @param totalXp Total XP of user
    * @returns Level info object
    */
@@ -70,47 +74,26 @@ export class LevelService implements OnModuleInit {
     xpForNextLevel: number;
     progressPercentage: number;
   } {
-    if (totalXp <= 0) {
-      return {
-        level: 1,
-        xpProgress: totalXp,
-        xpForNextLevel: this.getXpForNextLevel(1),
-        progressPercentage: 0,
-      };
+    if (totalXp < 0) {
+      totalXp = 0;
     }
 
-    let currentLevel = 1;
-    let xpAccumulated = 0;
-
-    // Find current level by checking each level's requirement
-    for (let level = 1; level < this.MAX_LEVEL; level++) {
-      const xpNeeded = this.getXpForNextLevel(level);
-      const totalXpForNextLevel = xpAccumulated + xpNeeded;
-      
-      if (totalXp >= totalXpForNextLevel) {
-        xpAccumulated = totalXpForNextLevel;
-        currentLevel = level + 1;
-      } else {
-        break;
-      }
-    }
+    // Simple formula: level = floor(totalXp / 150) + 1
+    const level = Math.floor(totalXp / 150) + 1;
 
     // Cap at max level
-    if (currentLevel > this.MAX_LEVEL) {
-      currentLevel = this.MAX_LEVEL;
-      const maxLevelXp = this.getTotalXpForLevel(this.MAX_LEVEL);
-      return {
-        level: this.MAX_LEVEL,
-        xpProgress: totalXp - maxLevelXp,
-        xpForNextLevel: 0,
-        progressPercentage: 100,
-      };
-    }
+    const currentLevel = Math.min(level, this.MAX_LEVEL);
 
-    // Calculate progress to next level
-    const xpForCurrentLevel = this.getTotalXpForLevel(currentLevel - 1);
+    // XP minimum pour atteindre ce niveau
+    const xpForCurrentLevel = (currentLevel - 1) * 150;
+
+    // XP dans le niveau actuel (XP total - XP minimum pour ce niveau)
     const xpProgress = totalXp - xpForCurrentLevel;
-    const xpForNextLevel = this.getXpForNextLevel(currentLevel);
+
+    // XP nécessaire pour passer au niveau suivant (dans le niveau actuel)
+    const xpForNextLevel = currentLevel >= this.MAX_LEVEL ? 0 : 150;
+
+    // Pourcentage de progression
     const progressPercentage = xpForNextLevel > 0 
       ? Math.min(100, Math.round((xpProgress / xpForNextLevel) * 100))
       : 100;
@@ -125,13 +108,10 @@ export class LevelService implements OnModuleInit {
 
   /**
    * Get total XP required to reach a specific level
+   * Formula: (level - 1) * 150
    */
   private getTotalXpForLevel(level: number): number {
-    let total = 0;
-    for (let l = 1; l < level; l++) {
-      total += this.getXpForNextLevel(l);
-    }
-    return total;
+    return (level - 1) * 150;
   }
 
   /**

@@ -27,6 +27,7 @@ export class AchievementsService {
 
   /**
    * Get achievements summary for user
+   * Always recalculates and corrects the level if necessary
    */
   async getSummary(userId: string): Promise<AchievementsSummaryDto> {
     const user = await this.userModel.findById(userId).exec();
@@ -36,6 +37,24 @@ export class AchievementsService {
 
     const totalXp = user.totalXp || 0;
     const levelInfo = this.levelService.calculateLevel(totalXp);
+
+    // Vérifier si le niveau stocké est correct et le corriger si nécessaire
+    const storedLevel = user.currentLevel || 1;
+    if (storedLevel !== levelInfo.level) {
+      this.logger.log(
+        `Correcting level for user ${userId}: stored level ${storedLevel} -> correct level ${levelInfo.level} (totalXp: ${totalXp})`,
+      );
+      
+      // Mettre à jour le niveau dans la base de données
+      await this.userModel.updateOne(
+        { _id: userId },
+        {
+          $set: {
+            currentLevel: levelInfo.level,
+          },
+        },
+      ).exec();
+    }
 
     // Get badge count
     const userBadges = await this.badgeService.getUserBadges(userId);
