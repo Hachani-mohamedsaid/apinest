@@ -116,40 +116,89 @@ export class ChallengeService {
         );
 
         // Check if this action counts toward the challenge
-        const shouldCount = await this.doesActionCount(actionType, challenge.unlockCriteria, context);
+        // Pass challengeType to help with period checking
+        this.logger.log(
+          `[ChallengeService] Checking if challenge "${challenge.name}" counts for action ${actionType}`,
+        );
+        this.logger.log(
+          `[ChallengeService] Challenge unlockCriteria: ${JSON.stringify(challenge.unlockCriteria)}`,
+        );
+        this.logger.log(
+          `[ChallengeService] Challenge challengeType: ${challenge.challengeType}`,
+        );
+        
+        const shouldCount = await this.doesActionCount(
+          actionType,
+          challenge.unlockCriteria,
+          context,
+          challenge.challengeType,
+        );
+        
+        this.logger.log(
+          `[ChallengeService] shouldCount result for "${challenge.name}": ${shouldCount}`,
+        );
+        
         if (!shouldCount) {
-          this.logger.debug(
-            `[ChallengeService] Challenge "${challenge.name}" does not count for action ${actionType} (user ${userId})`,
+          this.logger.warn(
+            `[ChallengeService] Challenge "${challenge.name}" does NOT count for action ${actionType} (user ${userId})`,
+          );
+          this.logger.warn(
+            `[ChallengeService] Reason: doesActionCount returned false. Check unlockCriteria and period matching.`,
           );
           continue;
         }
 
         // Update progress based on challenge type
         const oldProgress = userChallenge.currentProgress || 0;
+        this.logger.log(
+          `[ChallengeService] Current progress for "${challenge.name}": ${oldProgress}/${userChallenge.targetCount}`,
+        );
+        
         const progressIncrement = await this.calculateProgressIncrement(
           actionType,
           challenge.unlockCriteria,
           context,
+          challenge.challengeType,
+        );
+
+        this.logger.log(
+          `[ChallengeService] Calculated progress increment for "${challenge.name}": ${progressIncrement}`,
         );
 
         if (progressIncrement > 0) {
-          userChallenge.currentProgress = oldProgress + progressIncrement;
-          await userChallenge.save();
-
+          const newProgress = oldProgress + progressIncrement;
+          userChallenge.currentProgress = newProgress;
+          
           this.logger.log(
-            `[ChallengeService] Challenge progress updated for user ${userId}: "${challenge.name}" - ${oldProgress} -> ${userChallenge.currentProgress}/${userChallenge.targetCount}`,
+            `[ChallengeService] Saving challenge progress: ${oldProgress} -> ${newProgress}`,
           );
+          
+          try {
+            await userChallenge.save();
+            this.logger.log(
+              `[ChallengeService] ✅ Challenge progress SAVED successfully for user ${userId}: "${challenge.name}" - ${oldProgress} -> ${newProgress}/${userChallenge.targetCount}`,
+            );
+          } catch (saveError) {
+            this.logger.error(
+              `[ChallengeService] ❌ ERROR saving challenge progress: ${saveError.message}`,
+              saveError.stack,
+            );
+            throw saveError;
+          }
 
           // Check if challenge is completed
           if (userChallenge.currentProgress >= userChallenge.targetCount) {
             this.logger.log(
-              `[ChallengeService] Challenge "${challenge.name}" COMPLETED for user ${userId}!`,
+              `[ChallengeService] 🎉 Challenge "${challenge.name}" COMPLETED for user ${userId}!`,
             );
             await this.completeChallenge(userChallenge);
           }
         } else {
-          this.logger.debug(
-            `[ChallengeService] No progress increment for challenge "${challenge.name}" (increment: ${progressIncrement})`,
+          this.logger.warn(
+            `[ChallengeService] ⚠️ No progress increment for challenge "${challenge.name}" (increment: ${progressIncrement})`,
+          );
+          this.logger.warn(
+            `[ChallengeService] This means calculateProgressIncrement returned 0. Check period matching or criteria type.`,
           );
         }
       }
@@ -169,30 +218,69 @@ export class ChallengeService {
     actionType: string,
     criteria: Record<string, any>,
     context?: Record<string, any>,
+    challengeType?: string,
   ): Promise<number> {
-    const criteriaType = criteria.type;
+    const criteriaType = criteria?.type;
+
+    this.logger.log(
+      `[ChallengeService] calculateProgressIncrement called: actionType=${actionType}, criteriaType=${criteriaType}, challengeType=${challengeType}`,
+    );
 
     try {
       // Handle social connections separately (not related to activities)
       if (criteriaType === 'social_connections') {
+        this.logger.debug(`[ChallengeService] Social connections criteria, returning ${actionType === 'new_connection' ? 1 : 0}`);
         return actionType === 'new_connection' ? 1 : 0;
       }
 
       // For activity-related challenges, we need activity context
-      if (actionType !== 'complete_activity' || !context || !context.activity) {
+      if (actionType !== 'complete_activity') {
+        this.logger.warn(
+          `[ChallengeService] Action type mismatch: expected 'complete_activity', got '${actionType}'`,
+        );
+        return 0;
+      }
+
+      if (!context || !context.activity) {
+        this.logger.warn(
+          `[ChallengeService] Missing activity context: context=${!!context}, context.activity=${!!context?.activity}`,
+        );
         return 0;
       }
 
       const activity = context.activity;
+      this.logger.log(
+        `[ChallengeService] Activity data: sportType=${activity.sportType}, date=${activity.date}, completedAt=${activity.completedAt}`,
+      );
 
       switch (criteriaType) {
         case 'activities_in_period':
+          this.logger.log(
+            `[ChallengeService] Processing 'activities_in_period' criteria`,
+          );
           // For period-based challenges, verify the activity is in the correct period
-          const periodMatches = await this.checkActivitiesInPeriod(actionType, criteria, context);
+          const periodMatches = await this.checkActivitiesInPeriod(
+            actionType,
+            criteria,
+            context,
+            challengeType,
+          );
+          this.logger.log(
+            `[ChallengeService] Period check result for 'activities_in_period': ${periodMatches}`,
+          );
           if (!periodMatches) {
+            this.logger.warn(
+              `[ChallengeService] ❌ Period check FAILED for activities_in_period challenge (challengeType: ${challengeType})`,
+            );
+            this.logger.warn(
+              `[ChallengeService] Activity date does not match challenge period requirement`,
+            );
             return 0;
           }
           // If period matches, add 1 per activity
+          this.logger.log(
+            `[ChallengeService] ✅ Period check PASSED, returning increment: 1`,
+          );
           return 1;
 
         case 'activity_count':
@@ -201,7 +289,12 @@ export class ChallengeService {
 
         case 'distance_in_period':
           // For distance challenges with period, verify period first
-          const distancePeriodMatches = await this.checkActivitiesInPeriod(actionType, criteria, context);
+          const distancePeriodMatches = await this.checkActivitiesInPeriod(
+            actionType,
+            criteria,
+            context,
+            challengeType,
+          );
           if (!distancePeriodMatches) {
             return 0;
           }
@@ -213,7 +306,12 @@ export class ChallengeService {
 
         case 'duration_in_period':
           // For duration challenges with period, verify period first
-          const durationPeriodMatches = await this.checkActivitiesInPeriod(actionType, criteria, context);
+          const durationPeriodMatches = await this.checkActivitiesInPeriod(
+            actionType,
+            criteria,
+            context,
+            challengeType,
+          );
           if (!durationPeriodMatches) {
             return 0;
           }
@@ -228,8 +326,13 @@ export class ChallengeService {
           const requiredSport = criteria.sportType;
           if (activity.sportType === requiredSport) {
             // Also check period if specified
-            if (criteria.period) {
-              const sportPeriodMatches = await this.checkActivitiesInPeriod(actionType, criteria, context);
+            if (criteria.period || challengeType) {
+              const sportPeriodMatches = await this.checkActivitiesInPeriod(
+                actionType,
+                criteria,
+                context,
+                challengeType,
+              );
               if (!sportPeriodMatches) {
                 return 0;
               }
@@ -242,10 +345,19 @@ export class ChallengeService {
           return 1;
 
         default:
+          this.logger.warn(
+            `[ChallengeService] Unknown criteria type: ${criteriaType}`,
+          );
+          this.logger.warn(
+            `[ChallengeService] Available criteria types: activities_in_period, activity_count, distance_in_period, duration_in_period, sport_specific, sport_variety`,
+          );
           return 0;
       }
     } catch (error) {
-      this.logger.error(`Error calculating progress increment: ${error.message}`);
+      this.logger.error(
+        `[ChallengeService] ❌ ERROR calculating progress increment: ${error.message}`,
+        error.stack,
+      );
       return 0;
     }
   }
@@ -257,9 +369,25 @@ export class ChallengeService {
     actionType: string,
     criteria: Record<string, any>,
     context?: Record<string, any>,
+    challengeType?: string,
   ): Promise<boolean> {
-    const increment = await this.calculateProgressIncrement(actionType, criteria, context);
-    return increment > 0;
+    this.logger.log(
+      `[ChallengeService] doesActionCount called: actionType=${actionType}, criteriaType=${criteria?.type}, challengeType=${challengeType}`,
+    );
+    
+    const increment = await this.calculateProgressIncrement(
+      actionType,
+      criteria,
+      context,
+      challengeType,
+    );
+    
+    const result = increment > 0;
+    this.logger.log(
+      `[ChallengeService] doesActionCount result: increment=${increment}, returns=${result}`,
+    );
+    
+    return result;
   }
 
   /**
@@ -270,30 +398,52 @@ export class ChallengeService {
     actionType: string,
     criteria: Record<string, any>,
     context?: Record<string, any>,
+    challengeType?: string,
   ): Promise<boolean> {
+    this.logger.log(
+      `[ChallengeService] checkActivitiesInPeriod called: actionType=${actionType}, challengeType=${challengeType}`,
+    );
+    
     if (actionType !== 'complete_activity') {
+      this.logger.warn(
+        `[ChallengeService] Action type is not 'complete_activity': ${actionType}`,
+      );
       return false;
     }
 
     if (!context || !context.activity) {
+      this.logger.warn(
+        `[ChallengeService] Missing context or activity: context=${!!context}, activity=${!!context?.activity}`,
+      );
       return false;
     }
 
     const activity = context.activity;
-    const period = criteria.period || criteria.challengeType; // Support both 'period' and 'challengeType'
+    // Use challengeType from ChallengeDefinition if not in criteria
+    const period = criteria.period || challengeType || 'any';
     const activityTypes = criteria.activity_types || ['any'];
+
+    this.logger.log(
+      `[ChallengeService] Period check parameters: period=${period}, challengeType=${challengeType}, criteria.period=${criteria.period}, activityTypes=${JSON.stringify(activityTypes)}`,
+    );
 
     // Check activity type if specified
     if (activityTypes && !activityTypes.includes('any') && !activityTypes.includes(activity.sportType)) {
+      this.logger.warn(
+        `[ChallengeService] Activity type mismatch: activity.sportType=${activity.sportType}, required types=${JSON.stringify(activityTypes)}`,
+      );
       return false;
     }
 
     // Get activity date - prioritize completedAt (date of completion) for daily challenges
     // For daily challenges, we need the completion date, not the creation date
-    const activityDate = new Date(
-      activity.completedAt || activity.date || activity.time || new Date()
-    );
+    const activityDateSource = activity.completedAt || activity.date || activity.time || new Date();
+    const activityDate = new Date(activityDateSource);
     const now = new Date();
+
+    this.logger.log(
+      `[ChallengeService] Date check: activityDateSource=${activityDateSource}, activityDate=${activityDate.toISOString()}, now=${now.toISOString()}`,
+    );
 
     // Check period based on challenge type or period field
     if (period === 'day' || period === 'daily' || period === 'today') {
@@ -302,7 +452,41 @@ export class ChallengeService {
       today.setHours(0, 0, 0, 0);
       const activityDay = new Date(activityDate);
       activityDay.setHours(0, 0, 0, 0);
-      return activityDay.getTime() === today.getTime();
+      const isToday = activityDay.getTime() === today.getTime();
+      
+      this.logger.log(
+        `[ChallengeService] 📅 Daily period check:`,
+      );
+      this.logger.log(
+        `[ChallengeService]   - today (normalized): ${today.toISOString()}`,
+      );
+      this.logger.log(
+        `[ChallengeService]   - activityDay (normalized): ${activityDay.toISOString()}`,
+      );
+      this.logger.log(
+        `[ChallengeService]   - today timestamp: ${today.getTime()}`,
+      );
+      this.logger.log(
+        `[ChallengeService]   - activityDay timestamp: ${activityDay.getTime()}`,
+      );
+      this.logger.log(
+        `[ChallengeService]   - match: ${isToday}`,
+      );
+      
+      if (!isToday) {
+        this.logger.warn(
+          `[ChallengeService] ❌ Daily challenge FAILED: Activity was not completed today`,
+        );
+        this.logger.warn(
+          `[ChallengeService] Activity date: ${activityDay.toISOString()}, Today: ${today.toISOString()}`,
+        );
+      } else {
+        this.logger.log(
+          `[ChallengeService] ✅ Daily challenge PASSED: Activity was completed today`,
+        );
+      }
+      
+      return isToday;
     } else if (period === 'week' || period === 'weekly') {
       // Weekly challenge: activity must be from current week
       const weekStart = new Date(now);

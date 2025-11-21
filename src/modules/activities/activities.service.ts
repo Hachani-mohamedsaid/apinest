@@ -319,21 +319,37 @@ export class ActivitiesService {
     durationMinutes?: number,
     distanceKm?: number,
   ) {
+    this.logger.log(
+      `[ActivitiesService] completeActivity called: activityId=${activityId}, userId=${userId}, durationMinutes=${durationMinutes}, distanceKm=${distanceKm}`,
+    );
+    
     this.validateObjectId(activityId);
     
     const activity = await this.activityModel.findById(activityId).exec();
     if (!activity) {
+      this.logger.error(`[ActivitiesService] Activity not found: ${activityId}`);
       throw new NotFoundException('Activity not found');
     }
 
+    this.logger.log(
+      `[ActivitiesService] Activity found: title="${activity.title}", sportType="${activity.sportType}", creator="${activity.creator}"`,
+    );
+
     // Vérifier si l'utilisateur est le créateur
     if (activity.creator.toString() !== userId) {
+      this.logger.warn(
+        `[ActivitiesService] User ${userId} is not the creator of activity ${activityId}. Creator: ${activity.creator}`,
+      );
       throw new ForbiddenException('Only the host can mark activity as complete');
     }
+
+    this.logger.log(`[ActivitiesService] User is the creator, proceeding with completion...`);
 
     // Marquer l'activité comme complétée
     activity.isCompleted = true;
     await activity.save();
+    
+    this.logger.log(`[ActivitiesService] Activity marked as completed in database`);
 
     // Create activity log for all participants
     const participants = activity.participantIds || [];
@@ -342,15 +358,27 @@ export class ActivitiesService {
     const defaultDistance = distanceKm || 0;
 
     // Log activity for each participant
+    this.logger.log(
+      `[ActivitiesService] Processing ${participants.length} participants for activity completion`,
+    );
+    
     for (const participantId of participants) {
       const participantIdStr = participantId.toString();
       const participantIsHost = participantIdStr === activity.creator.toString();
+
+      this.logger.log(
+        `[ActivitiesService] Processing participant: ${participantIdStr} (isHost: ${participantIsHost})`,
+      );
 
       // Calculer l'XP selon la formule détaillée
       const xpEarned = this.xpService.calculateActivityXp(
         activity.sportType,
         defaultDuration,
         defaultDistance > 0 ? defaultDistance : undefined,
+      );
+
+      this.logger.log(
+        `[ActivitiesService] XP calculated for participant ${participantIdStr}: ${xpEarned} XP`,
       );
 
       // Create activity log with detailed information
@@ -367,12 +395,21 @@ export class ActivitiesService {
       });
 
       // Award XP for completing activity (avec le calcul détaillé)
+      this.logger.log(
+        `[ActivitiesService] Adding ${xpEarned} XP to participant ${participantIdStr}`,
+      );
       await this.xpService.addXp(participantIdStr, xpEarned, 'complete_activity');
 
       // Update streak
+      this.logger.log(
+        `[ActivitiesService] Updating streak for participant ${participantIdStr}`,
+      );
       await this.streakService.updateStreak(participantIdStr, activityDate);
 
       // Check badges (peut débloquer des badges et donner de l'XP bonus)
+      this.logger.log(
+        `[ActivitiesService] Checking badges for participant ${participantIdStr}`,
+      );
       await this.badgeService.checkAndAwardBadges(participantIdStr, 'activity_complete', {
         activity: {
           sportType: activity.sportType,
@@ -384,26 +421,59 @@ export class ActivitiesService {
       });
 
       // Activate challenges for user (if not already activated)
+      this.logger.log(
+        `[ActivitiesService] Activating challenges for participant ${participantIdStr}`,
+      );
       await this.challengeService.activateChallengesForUser(participantIdStr);
 
       // Update challenges (avec les informations détaillées)
       // Important: Pour les challenges quotidiens, on utilise la date de complétion (aujourd'hui)
       // pas la date de création de l'activité
       const completionDate = new Date(); // Date actuelle = date de complétion
+      
       this.logger.log(
-        `[ActivitiesService] Updating challenge progress for participant ${participantIdStr} after activity completion`,
+        `[ActivitiesService] ========================================`,
       );
-      await this.challengeService.updateChallengeProgress(participantIdStr, 'complete_activity', {
-        activity: {
-          sportType: activity.sportType,
-          date: completionDate, // Utiliser la date de complétion pour les challenges quotidiens
-          time: completionDate, // Utiliser la date de complétion
-          completedAt: completionDate, // Date de complétion explicite
-          durationMinutes: defaultDuration,
-          distanceKm: defaultDistance,
-        },
-      });
+      this.logger.log(
+        `[ActivitiesService] 🎯 UPDATING CHALLENGE PROGRESS for participant ${participantIdStr}`,
+      );
+      this.logger.log(
+        `[ActivitiesService] Completion date: ${completionDate.toISOString()}`,
+      );
+      this.logger.log(
+        `[ActivitiesService] Activity data: sportType=${activity.sportType}, duration=${defaultDuration}, distance=${defaultDistance}`,
+      );
+      this.logger.log(
+        `[ActivitiesService] ========================================`,
+      );
+      
+      try {
+        await this.challengeService.updateChallengeProgress(participantIdStr, 'complete_activity', {
+          activity: {
+            sportType: activity.sportType,
+            date: completionDate, // Utiliser la date de complétion pour les challenges quotidiens
+            time: completionDate, // Utiliser la date de complétion
+            completedAt: completionDate, // Date de complétion explicite
+            durationMinutes: defaultDuration,
+            distanceKm: defaultDistance,
+          },
+        });
+        
+        this.logger.log(
+          `[ActivitiesService] ✅ Challenge progress update completed for participant ${participantIdStr}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[ActivitiesService] ❌ ERROR updating challenge progress for participant ${participantIdStr}: ${error.message}`,
+          error.stack,
+        );
+        // Ne pas bloquer la complétion d'activité si la mise à jour des challenges échoue
+      }
     }
+    
+    this.logger.log(
+      `[ActivitiesService] ✅ Activity completion processed for all ${participants.length} participants`,
+    );
 
     return { message: 'Activity marked as complete' };
   }
