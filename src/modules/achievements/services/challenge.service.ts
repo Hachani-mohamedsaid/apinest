@@ -81,6 +81,10 @@ export class ChallengeService {
     context?: Record<string, any>,
   ): Promise<void> {
     try {
+      this.logger.log(
+        `[ChallengeService] Updating challenge progress for user ${userId}, action: ${actionType}`,
+      );
+
       // Get all active challenges for user
       const userChallenges = await this.userChallengeModel
         .find({
@@ -90,15 +94,32 @@ export class ChallengeService {
         .populate('challengeId')
         .exec();
 
+      this.logger.log(
+        `[ChallengeService] Found ${userChallenges.length} active challenges for user ${userId}`,
+      );
+
+      if (context?.activity) {
+        this.logger.debug(
+          `[ChallengeService] Activity data: sportType=${context.activity.sportType}, date=${context.activity.date}, completedAt=${context.activity.completedAt}`,
+        );
+      }
+
       for (const userChallenge of userChallenges) {
         const challenge = userChallenge.challengeId as unknown as ChallengeDefinitionDocument;
-        if (!challenge || !challenge._id) continue;
+        if (!challenge || !challenge._id) {
+          this.logger.warn(`[ChallengeService] Challenge definition not found for userChallenge ${userChallenge._id}`);
+          continue;
+        }
+
+        this.logger.debug(
+          `[ChallengeService] Processing challenge: "${challenge.name}" (type: ${challenge.challengeType || 'unknown'})`,
+        );
 
         // Check if this action counts toward the challenge
         const shouldCount = await this.doesActionCount(actionType, challenge.unlockCriteria, context);
         if (!shouldCount) {
           this.logger.debug(
-            `Challenge "${challenge.name}" does not count for action ${actionType} (user ${userId})`,
+            `[ChallengeService] Challenge "${challenge.name}" does not count for action ${actionType} (user ${userId})`,
           );
           continue;
         }
@@ -116,17 +137,28 @@ export class ChallengeService {
           await userChallenge.save();
 
           this.logger.log(
-            `Challenge progress updated for user ${userId}: "${challenge.name}" - ${oldProgress} -> ${userChallenge.currentProgress}/${userChallenge.targetCount}`,
+            `[ChallengeService] Challenge progress updated for user ${userId}: "${challenge.name}" - ${oldProgress} -> ${userChallenge.currentProgress}/${userChallenge.targetCount}`,
           );
-        }
 
-        // Check if challenge is completed
-        if (userChallenge.currentProgress >= userChallenge.targetCount) {
-          await this.completeChallenge(userChallenge);
+          // Check if challenge is completed
+          if (userChallenge.currentProgress >= userChallenge.targetCount) {
+            this.logger.log(
+              `[ChallengeService] Challenge "${challenge.name}" COMPLETED for user ${userId}!`,
+            );
+            await this.completeChallenge(userChallenge);
+          }
+        } else {
+          this.logger.debug(
+            `[ChallengeService] No progress increment for challenge "${challenge.name}" (increment: ${progressIncrement})`,
+          );
         }
       }
     } catch (error) {
-      this.logger.error(`Error updating challenge progress for user ${userId}: ${error.message}`);
+      this.logger.error(
+        `[ChallengeService] Error updating challenge progress for user ${userId}: ${error.message}`,
+        error.stack,
+      );
+      throw error;
     }
   }
 
