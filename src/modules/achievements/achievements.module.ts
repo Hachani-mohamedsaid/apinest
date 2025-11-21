@@ -9,6 +9,7 @@ import { StreakService } from './services/streak.service';
 import { BadgeService } from './services/badge.service';
 import { ChallengeService } from './services/challenge.service';
 import { LeaderboardService } from './services/leaderboard.service';
+import { NotificationService } from './services/notification.service';
 import { Level, LevelSchema } from './schemas/level.schema';
 import { BadgeDefinition, BadgeDefinitionSchema } from './schemas/badge-definition.schema';
 import { UserBadge, UserBadgeSchema } from './schemas/user-badge.schema';
@@ -17,6 +18,7 @@ import { UserChallenge, UserChallengeSchema } from './schemas/user-challenge.sch
 import { ActivityLog, ActivityLogSchema } from './schemas/activity-log.schema';
 import { UserStreak, UserStreakSchema } from './schemas/user-streak.schema';
 import { LeaderboardCache, LeaderboardCacheSchema } from './schemas/leaderboard-cache.schema';
+import { Notification, NotificationSchema } from './schemas/notification.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { Activity, ActivitySchema } from '../activities/schemas/activity.schema';
 import { UsersModule } from '../users/users.module';
@@ -34,6 +36,7 @@ import { UsersModule } from '../users/users.module';
       { name: ActivityLog.name, schema: ActivityLogSchema },
       { name: UserStreak.name, schema: UserStreakSchema },
       { name: LeaderboardCache.name, schema: LeaderboardCacheSchema },
+      { name: Notification.name, schema: NotificationSchema },
       { name: User.name, schema: UserSchema },
       { name: Activity.name, schema: ActivitySchema }, // Pour compter les activités créées
     ]),
@@ -47,6 +50,7 @@ import { UsersModule } from '../users/users.module';
     BadgeService,
     ChallengeService,
     LeaderboardService,
+    NotificationService,
   ],
   // Les services sont déjà disponibles via exports, mais on doit s'assurer que les dépendances circulaires sont gérées
   exports: [
@@ -56,6 +60,7 @@ import { UsersModule } from '../users/users.module';
     BadgeService,
     ChallengeService,
     LeaderboardService,
+    NotificationService,
   ],
 })
 export class AchievementsModule {}

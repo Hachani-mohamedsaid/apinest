@@ -1,4 +1,4 @@
-import { Controller, Get, Query, UseGuards, Request } from '@nestjs/common';
+import { Controller, Get, Post, Param, Query, Body, UseGuards, Request } from '@nestjs/common';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AchievementsService } from './achievements.service';
 import { AchievementsSummaryDto } from './dto/achievements-summary.dto';
@@ -42,6 +42,37 @@ export class AchievementsController {
     const pageNum = page ? parseInt(page, 10) : 1;
     const limitNum = limit ? parseInt(limit, 10) : 20;
     return this.achievementsService.getLeaderboard(userId, pageNum, limitNum);
+  }
+
+  @Get('notifications')
+  @UseGuards(JwtAuthGuard)
+  async getNotifications(
+    @Request() req,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('unreadOnly') unreadOnly?: string,
+  ) {
+    const userId = req.user._id.toString();
+    const pageNum = page ? parseInt(page, 10) : 1;
+    const limitNum = limit ? parseInt(limit, 10) : 20;
+    const unreadOnlyBool = unreadOnly === 'true';
+    return this.achievementsService.getNotifications(userId, pageNum, limitNum, unreadOnlyBool);
+  }
+
+  @Post('notifications/:id/read')
+  @UseGuards(JwtAuthGuard)
+  async markNotificationAsRead(@Request() req, @Param('id') notificationId: string) {
+    const userId = req.user._id.toString();
+    await this.achievementsService.markNotificationAsRead(userId, notificationId);
+    return { success: true };
+  }
+
+  @Post('notifications/read-all')
+  @UseGuards(JwtAuthGuard)
+  async markAllNotificationsAsRead(@Request() req) {
+    const userId = req.user._id.toString();
+    await this.achievementsService.markAllNotificationsAsRead(userId);
+    return { success: true };
   }
 }
 

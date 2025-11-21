@@ -6,6 +6,7 @@ import { LevelService } from './services/level.service';
 import { BadgeService } from './services/badge.service';
 import { ChallengeService } from './services/challenge.service';
 import { LeaderboardService } from './services/leaderboard.service';
+import { NotificationService } from './services/notification.service';
 import { AchievementsSummaryDto } from './dto/achievements-summary.dto';
 import { BadgesResponseDto } from './dto/badges-response.dto';
 import { ChallengesResponseDto } from './dto/challenges-response.dto';
@@ -21,6 +22,7 @@ export class AchievementsService {
     private readonly badgeService: BadgeService,
     private readonly challengeService: ChallengeService,
     private readonly leaderboardService: LeaderboardService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -209,6 +211,32 @@ export class AchievementsService {
       this.logger.error(`Error processing activity creation for user ${userId}: ${error.message}`);
       // Ne pas bloquer la création d'activité si l'achievement échoue
     }
+  }
+
+  /**
+   * Get user notifications
+   */
+  async getNotifications(
+    userId: string,
+    page: number = 1,
+    limit: number = 20,
+    unreadOnly: boolean = false,
+  ) {
+    return this.notificationService.getUserNotifications(userId, page, limit, unreadOnly);
+  }
+
+  /**
+   * Mark notification as read
+   */
+  async markNotificationAsRead(userId: string, notificationId: string): Promise<void> {
+    await this.notificationService.markAsRead(userId, notificationId);
+  }
+
+  /**
+   * Mark all notifications as read
+   */
+  async markAllNotificationsAsRead(userId: string): Promise<void> {
+    await this.notificationService.markAllAsRead(userId);
   }
 }
 

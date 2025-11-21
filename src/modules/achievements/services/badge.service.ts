@@ -7,6 +7,7 @@ import { ActivityLog, ActivityLogDocument } from '../schemas/activity-log.schema
 import { UserStreak, UserStreakDocument } from '../schemas/user-streak.schema';
 import { Activity, ActivityDocument } from '../../activities/schemas/activity.schema';
 import { XpService } from './xp.service';
+import { NotificationService } from './notification.service';
 
 @Injectable()
 export class BadgeService {
@@ -24,6 +25,7 @@ export class BadgeService {
     @InjectModel(UserStreak.name)
     private readonly streakModel: Model<UserStreakDocument>,
     private readonly xpService: XpService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -305,6 +307,18 @@ export class BadgeService {
       // Award XP based on badge rarity
       const xpReward = this.xpService.getBadgeXpReward(badge.rarity, badge.xpReward);
       await this.xpService.addXp(userId, xpReward, 'earn_badge');
+
+      // Create notification for badge unlocked
+      try {
+        await this.notificationService.createBadgeUnlockedNotification(
+          userId,
+          badge.name,
+          badgeId,
+          xpReward,
+        );
+      } catch (error) {
+        this.logger.warn(`Failed to create notification for badge unlock: ${error.message}`);
+      }
 
       this.logger.log(`Badge "${badge.name}" awarded to user ${userId} with ${xpReward} XP`);
     } catch (error) {

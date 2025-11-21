@@ -4,6 +4,7 @@ import { Model } from 'mongoose';
 import { User, UserDocument } from '../../users/schemas/user.schema';
 import { LevelService } from './level.service';
 import { LeaderboardService } from './leaderboard.service';
+import { NotificationService } from './notification.service';
 import { BadgeRarity } from '../schemas/badge-definition.schema';
 
 @Injectable()
@@ -94,6 +95,7 @@ export class XpService {
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
     private readonly levelService: LevelService,
     private readonly leaderboardService: LeaderboardService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -111,6 +113,7 @@ export class XpService {
       }
 
       const oldTotalXp = user.totalXp || 0;
+      const oldLevel = user.currentLevel || 1;
       const newTotalXp = oldTotalXp + amount;
 
       // Update user XP
@@ -125,6 +128,35 @@ export class XpService {
       this.logger.log(
         `Added ${amount} XP to user ${userId} from ${source}. Total: ${newTotalXp}, Level: ${levelInfo.level}`,
       );
+
+      // Create notification if level up
+      if (levelInfo.level > oldLevel) {
+        try {
+          await this.notificationService.createLevelUpNotification(
+            userId,
+            oldLevel,
+            levelInfo.level,
+            newTotalXp,
+          );
+        } catch (error) {
+          this.logger.warn(`Failed to create level up notification: ${error.message}`);
+        }
+      }
+
+      // Create notification for significant XP gains (only for certain sources to avoid spam)
+      const shouldNotifyXp = ['complete_activity', 'host_event', 'earn_badge', 'challenge_completed'].includes(source);
+      if (shouldNotifyXp && amount >= 50) {
+        try {
+          await this.notificationService.createXpEarnedNotification(
+            userId,
+            amount,
+            source,
+            newTotalXp,
+          );
+        } catch (error) {
+          this.logger.warn(`Failed to create XP notification: ${error.message}`);
+        }
+      }
 
       // Update leaderboard rank
       await this.leaderboardService.updateUserRank(userId);
