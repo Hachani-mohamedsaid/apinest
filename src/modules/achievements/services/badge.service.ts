@@ -1,7 +1,7 @@
-import { Injectable, Logger, Inject, forwardRef } from '@nestjs/common';
+import { Injectable, Logger, Inject, forwardRef, OnModuleInit } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
-import { BadgeDefinition, BadgeDefinitionDocument } from '../schemas/badge-definition.schema';
+import { BadgeDefinition, BadgeDefinitionDocument, BadgeRarity, BadgeCategory } from '../schemas/badge-definition.schema';
 import { UserBadge, UserBadgeDocument } from '../schemas/user-badge.schema';
 import { ActivityLog, ActivityLogDocument } from '../schemas/activity-log.schema';
 import { UserStreak, UserStreakDocument } from '../schemas/user-streak.schema';
@@ -10,7 +10,7 @@ import { XpService } from './xp.service';
 import { NotificationService } from './notification.service';
 
 @Injectable()
-export class BadgeService {
+export class BadgeService implements OnModuleInit {
   private readonly logger = new Logger(BadgeService.name);
 
   constructor(
@@ -27,6 +27,213 @@ export class BadgeService {
     private readonly xpService: XpService,
     private readonly notificationService: NotificationService,
   ) {}
+
+  /**
+   * Initialize badges in database on module init
+   */
+  async onModuleInit() {
+    try {
+      const badgeCount = await this.badgeDefinitionModel.countDocuments({ isActive: true }).exec();
+      if (badgeCount === 0) {
+        this.logger.log('No badges found. Initializing badges in database...');
+        await this.initializeBadges();
+        this.logger.log('✅ Badges initialized successfully');
+      } else {
+        this.logger.log(`Badges already exist (${badgeCount} active badges found)`);
+      }
+    } catch (error) {
+      this.logger.error(`Error initializing badges: ${error.message}`, error.stack);
+    }
+  }
+
+  /**
+   * Initialize all badges in database
+   */
+  private async initializeBadges(): Promise<void> {
+    const badges = [
+      // Badges de Création d'Activité
+      {
+        name: 'Premier Hôte',
+        description: 'Créer votre première activité',
+        iconUrl: '🏠',
+        rarity: BadgeRarity.COMMON,
+        category: BadgeCategory.ACTIVITY,
+        xpReward: 100,
+        isActive: true,
+        unlockCriteria: {
+          type: 'activity_creation_count',
+          count: 1,
+        },
+      },
+      {
+        name: 'Hôte Populaire',
+        description: 'Créer 5 activités',
+        iconUrl: '👥',
+        rarity: BadgeRarity.UNCOMMON,
+        category: BadgeCategory.ACTIVITY,
+        xpReward: 250,
+        isActive: true,
+        unlockCriteria: {
+          type: 'activity_creation_count',
+          count: 5,
+        },
+      },
+      {
+        name: 'Organisateur Pro',
+        description: 'Créer 10 activités',
+        iconUrl: '⭐',
+        rarity: BadgeRarity.RARE,
+        category: BadgeCategory.ACTIVITY,
+        xpReward: 500,
+        isActive: true,
+        unlockCriteria: {
+          type: 'activity_creation_count',
+          count: 10,
+        },
+      },
+      // Badges de Complétion d'Activité
+      {
+        name: 'Premier Pas',
+        description: 'Compléter votre première activité',
+        iconUrl: '👣',
+        rarity: BadgeRarity.COMMON,
+        category: BadgeCategory.ACTIVITY,
+        xpReward: 100,
+        isActive: true,
+        unlockCriteria: {
+          type: 'activity_count',
+          count: 1,
+        },
+      },
+      {
+        name: 'Sportif Actif',
+        description: 'Compléter 5 activités',
+        iconUrl: '🏃',
+        rarity: BadgeRarity.UNCOMMON,
+        category: BadgeCategory.ACTIVITY,
+        xpReward: 250,
+        isActive: true,
+        unlockCriteria: {
+          type: 'activity_count',
+          count: 5,
+        },
+      },
+      {
+        name: 'Champion',
+        description: 'Compléter 10 activités',
+        iconUrl: '🏆',
+        rarity: BadgeRarity.RARE,
+        category: BadgeCategory.ACTIVITY,
+        xpReward: 500,
+        isActive: true,
+        unlockCriteria: {
+          type: 'activity_count',
+          count: 10,
+        },
+      },
+      // Badges de Distance
+      {
+        name: 'Coureur Débutant',
+        description: 'Parcourir 10 km au total',
+        iconUrl: '🏃',
+        rarity: BadgeRarity.COMMON,
+        category: BadgeCategory.ACTIVITY,
+        xpReward: 150,
+        isActive: true,
+        unlockCriteria: {
+          type: 'distance_total',
+          km: 10,
+        },
+      },
+      {
+        name: 'Marathonien',
+        description: 'Parcourir 50 km au total',
+        iconUrl: '🏅',
+        rarity: BadgeRarity.RARE,
+        category: BadgeCategory.ACTIVITY,
+        xpReward: 500,
+        isActive: true,
+        unlockCriteria: {
+          type: 'distance_total',
+          km: 50,
+        },
+      },
+      // Badges de Durée
+      {
+        name: 'Débutant',
+        description: 'Accumuler 60 minutes d\'activité',
+        iconUrl: '⏱️',
+        rarity: BadgeRarity.COMMON,
+        category: BadgeCategory.ACTIVITY,
+        xpReward: 100,
+        isActive: true,
+        unlockCriteria: {
+          type: 'duration_total',
+          minutes: 60,
+        },
+      },
+      {
+        name: 'Entraîné',
+        description: 'Accumuler 300 minutes d\'activité',
+        iconUrl: '💪',
+        rarity: BadgeRarity.UNCOMMON,
+        category: BadgeCategory.ACTIVITY,
+        xpReward: 500,
+        isActive: true,
+        unlockCriteria: {
+          type: 'duration_total',
+          minutes: 300,
+        },
+      },
+      // Badges de Série
+      {
+        name: 'Début de Série',
+        description: 'Maintenir une série de 3 jours',
+        iconUrl: '🔥',
+        rarity: BadgeRarity.COMMON,
+        category: BadgeCategory.STREAK,
+        xpReward: 150,
+        isActive: true,
+        unlockCriteria: {
+          type: 'streak_days',
+          days: 3,
+        },
+      },
+      {
+        name: 'Série Régulière',
+        description: 'Maintenir une série de 7 jours',
+        iconUrl: '🔥🔥',
+        rarity: BadgeRarity.UNCOMMON,
+        category: BadgeCategory.STREAK,
+        xpReward: 300,
+        isActive: true,
+        unlockCriteria: {
+          type: 'streak_days',
+          days: 7,
+        },
+      },
+    ];
+
+    let created = 0;
+    let skipped = 0;
+
+    for (const badgeData of badges) {
+      const existing = await this.badgeDefinitionModel.findOne({ name: badgeData.name }).exec();
+      
+      if (existing) {
+        this.logger.debug(`Badge "${badgeData.name}" already exists, skipping`);
+        skipped++;
+        continue;
+      }
+
+      const badge = new this.badgeDefinitionModel(badgeData);
+      await badge.save();
+      this.logger.log(`✅ Badge "${badgeData.name}" created`);
+      created++;
+    }
+
+    this.logger.log(`📊 Badges initialization: ${created} created, ${skipped} skipped`);
+  }
 
   /**
    * Check and award badges based on trigger type
