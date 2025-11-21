@@ -5,6 +5,7 @@ import { BadgeDefinition, BadgeDefinitionDocument } from '../schemas/badge-defin
 import { UserBadge, UserBadgeDocument } from '../schemas/user-badge.schema';
 import { ActivityLog, ActivityLogDocument } from '../schemas/activity-log.schema';
 import { UserStreak, UserStreakDocument } from '../schemas/user-streak.schema';
+import { Activity, ActivityDocument } from '../../activities/schemas/activity.schema';
 import { XpService } from './xp.service';
 
 @Injectable()
@@ -18,6 +19,8 @@ export class BadgeService {
     private readonly userBadgeModel: Model<UserBadgeDocument>,
     @InjectModel(ActivityLog.name)
     private readonly activityLogModel: Model<ActivityLogDocument>,
+    @InjectModel(Activity.name)
+    private readonly activityModel: Model<ActivityDocument>,
     @InjectModel(UserStreak.name)
     private readonly streakModel: Model<UserStreakDocument>,
     private readonly xpService: XpService,
@@ -71,6 +74,11 @@ export class BadgeService {
         case 'activity_count':
           return await this.checkActivityCount(userId, criteria);
 
+        case 'activity_creation_count':
+        case 'host_events':
+          // Utiliser la méthode améliorée qui gère les créations d'activité
+          return await this.checkActivityCreationCount(userId, criteria, context);
+
         case 'distance_total':
           return await this.checkDistanceTotal(userId, criteria);
 
@@ -82,9 +90,6 @@ export class BadgeService {
 
         case 'streak_days':
           return await this.checkStreakDays(userId, criteria);
-
-        case 'host_events':
-          return await this.checkHostEvents(userId, criteria);
 
         case 'combined':
           return await this.checkCombinedCriteria(userId, criteria);
@@ -143,13 +148,68 @@ export class BadgeService {
 
   /**
    * Check host events criteria
+   * Vérifie le nombre d'activités créées (en tant qu'hôte)
+   * Utilise ActivityLog pour les activités complétées ET les activités en cours
    */
   private async checkHostEvents(userId: string, criteria: Record<string, any>): Promise<boolean> {
     const requiredCount = criteria.count || 0;
-    const count = await this.activityLogModel
+    
+    // Compter les activités où l'utilisateur est hôte (via ActivityLog)
+    // Cela inclut les activités complétées où isHost = true
+    const completedHostCount = await this.activityLogModel
       .countDocuments({ userId, isHost: true })
       .exec();
-    return count >= requiredCount;
+    
+    // Note: Pour les activités créées mais non complétées,
+    // on utilise le modèle Activity directement via le context si disponible
+    // ou on compte uniquement les activités complétées
+    
+    // Si le context indique une création d'activité, on ajoute +1
+    // Le comptage total inclut les activités complétées + la nouvelle création
+    
+    return completedHostCount >= requiredCount;
+  }
+
+  /**
+   * Check activity creation count (for badges like "Premier Hôte")
+   * Vérifie le nombre total d'activités créées par l'utilisateur
+   * Compte à la fois les activités complétées (via ActivityLog) et non complétées (via Activity)
+   */
+  private async checkActivityCreationCount(
+    userId: string,
+    criteria: Record<string, any>,
+    context?: Record<string, any>,
+  ): Promise<boolean> {
+    const requiredCount = criteria.count || 0;
+    
+    // 1. Compter les activités complétées où l'utilisateur était hôte (via ActivityLog)
+    const completedHostCount = await this.activityLogModel
+      .countDocuments({ userId, isHost: true })
+      .exec();
+    
+    // 2. Compter les activités créées mais non encore complétées (via Activity model)
+    // Ce sont les activités où creator = userId et isCompleted = false ou null
+    const pendingActivitiesCount = await this.activityModel
+      .countDocuments({ 
+        creator: userId,
+        $or: [
+          { isCompleted: false },
+          { isCompleted: { $exists: false } }
+        ]
+      })
+      .exec();
+    
+    // 3. Total des activités créées = complétées + en attente
+    const totalCreated = completedHostCount + pendingActivitiesCount;
+    
+    // 4. Si c'est une création d'activité en cours (dans le context), inclure cette nouvelle création
+    if (context?.action === 'create_activity') {
+      // Le badge sera débloqué si total + 1 >= requiredCount
+      return (totalCreated + 1) >= requiredCount;
+    }
+    
+    // Sinon, vérifier avec le total actuel
+    return totalCreated >= requiredCount;
   }
 
   /**

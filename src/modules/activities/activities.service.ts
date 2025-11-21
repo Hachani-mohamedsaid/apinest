@@ -1,5 +1,6 @@
 import {
   Injectable,
+  Logger,
   NotFoundException,
   ForbiddenException,
   BadRequestException,
@@ -17,6 +18,8 @@ import { ActivityLog, ActivityLogDocument } from '../achievements/schemas/activi
 
 @Injectable()
 export class ActivitiesService {
+  private readonly logger = new Logger(ActivitiesService.name);
+
   constructor(
     @InjectModel(Activity.name) private activityModel: Model<ActivityDocument>,
     @InjectModel(ActivityLog.name) private activityLogModel: Model<ActivityLogDocument>,
@@ -55,6 +58,20 @@ export class ActivitiesService {
 
     // Award XP for hosting event
     await this.xpService.addXp(userId, XpService.XP_REWARDS.HOST_EVENT, 'host_event');
+
+    // Vérifier et débloquer les badges de création d'activité
+    try {
+      await this.badgeService.checkAndAwardBadges(userId, 'activity_created', {
+        action: 'create_activity',
+        activity: {
+          sportType: savedActivity.sportType,
+          isHost: true,
+        },
+      });
+    } catch (error) {
+      // Ne pas bloquer la création si la vérification de badge échoue
+      this.logger.error(`Error checking badges for activity creation: ${error.message}`);
+    }
 
     return savedActivity;
   }

@@ -190,5 +190,25 @@ export class AchievementsService {
       throw error;
     }
   }
+
+  /**
+   * Called when an activity is created
+   * Vérifie et débloque les badges de création d'activité
+   */
+  async onActivityCreated(userId: string): Promise<void> {
+    try {
+      this.logger.log(`Processing activity creation for user ${userId}`);
+
+      // Vérifier et débloquer les badges de création
+      await this.badgeService.checkAndAwardBadges(userId, 'activity_created', {
+        action: 'create_activity',
+      });
+
+      this.logger.log(`Activity creation processed for user ${userId}`);
+    } catch (error) {
+      this.logger.error(`Error processing activity creation for user ${userId}: ${error.message}`);
+      // Ne pas bloquer la création d'activité si l'achievement échoue
+    }
+  }
 }
 

@@ -1,0 +1,55 @@
+[
+  {
+    "name": "Premier Hôte",
+    "description": "Créer votre première activité",
+    "iconUrl": "🎨",
+    "rarity": "common",
+    "category": "creation",
+    "isActive": true,
+    "unlockCriteria": {
+      "type": "activity_creation_count",
+      "count": 1
+    },
+    "xpReward": 100
+  },
+  {
+    "name": "Hôte Populaire",
+    "description": "Créer 5 activités",
+    "iconUrl": "👑",
+    "rarity": "rare",
+    "category": "creation",
+    "isActive": true,
+    "unlockCriteria": {
+      "type": "activity_creation_count",
+      "count": 5
+    },
+    "xpReward": 250
+  },
+  {
+    "name": "Organisateur Pro",
+    "description": "Créer 10 activités",
+    "iconUrl": "🏆",
+    "rarity": "epic",
+    "category": "creation",
+    "isActive": true,
+    "unlockCriteria": {
+      "type": "activity_creation_count",
+      "count": 10
+    },
+    "xpReward": 500
+  },
+  {
+    "name": "Maître Organisateur",
+    "description": "Créer 25 activités",
+    "iconUrl": "🌟",
+    "rarity": "legendary",
+    "category": "creation",
+    "isActive": true,
+    "unlockCriteria": {
+      "type": "activity_creation_count",
+      "count": 25
+    },
+    "xpReward": 1000
+  }
+]
+

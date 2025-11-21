@@ -18,6 +18,7 @@ import { ActivityLog, ActivityLogSchema } from './schemas/activity-log.schema';
 import { UserStreak, UserStreakSchema } from './schemas/user-streak.schema';
 import { LeaderboardCache, LeaderboardCacheSchema } from './schemas/leaderboard-cache.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
+import { Activity, ActivitySchema } from '../activities/schemas/activity.schema';
 import { UsersModule } from '../users/users.module';
 
 @Module({
@@ -34,6 +35,7 @@ import { UsersModule } from '../users/users.module';
       { name: UserStreak.name, schema: UserStreakSchema },
       { name: LeaderboardCache.name, schema: LeaderboardCacheSchema },
       { name: User.name, schema: UserSchema },
+      { name: Activity.name, schema: ActivitySchema }, // Pour compter les activités créées
     ]),
   ],
   controllers: [AchievementsController],
