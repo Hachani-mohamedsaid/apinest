@@ -234,9 +234,10 @@ export class ChallengeService {
       }
 
       // For activity-related challenges, we need activity context
-      if (actionType !== 'complete_activity') {
+      // Accept both 'complete_activity' and 'create_activity'
+      if (actionType !== 'complete_activity' && actionType !== 'create_activity') {
         this.logger.warn(
-          `[ChallengeService] Action type mismatch: expected 'complete_activity', got '${actionType}'`,
+          `[ChallengeService] Action type mismatch: expected 'complete_activity' or 'create_activity', got '${actionType}'`,
         );
         return 0;
       }
@@ -404,9 +405,10 @@ export class ChallengeService {
       `[ChallengeService] checkActivitiesInPeriod called: actionType=${actionType}, challengeType=${challengeType}`,
     );
     
-    if (actionType !== 'complete_activity') {
+    // Accepter à la fois 'complete_activity' et 'create_activity'
+    if (actionType !== 'complete_activity' && actionType !== 'create_activity') {
       this.logger.warn(
-        `[ChallengeService] Action type is not 'complete_activity': ${actionType}`,
+        `[ChallengeService] Action type is not 'complete_activity' or 'create_activity': ${actionType}`,
       );
       return false;
     }
@@ -435,14 +437,19 @@ export class ChallengeService {
       return false;
     }
 
-    // Get activity date - prioritize completedAt (date of completion) for daily challenges
-    // For daily challenges, we need the completion date, not the creation date
-    const activityDateSource = activity.completedAt || activity.date || activity.time || new Date();
+    // Get activity date - prioritize completedAt for completion, createdAt for creation
+    // For daily challenges, we need the date of the action (completion or creation)
+    const activityDateSource = 
+      activity.completedAt || // Date de complétion (pour complete_activity)
+      activity.createdAt ||   // Date de création (pour create_activity)
+      activity.date || 
+      activity.time || 
+      new Date();
     const activityDate = new Date(activityDateSource);
     const now = new Date();
 
     this.logger.log(
-      `[ChallengeService] Date check: activityDateSource=${activityDateSource}, activityDate=${activityDate.toISOString()}, now=${now.toISOString()}`,
+      `[ChallengeService] Date check: actionType=${actionType}, activityDateSource=${activityDateSource}, activityDate=${activityDate.toISOString()}, now=${now.toISOString()}`,
     );
 
     // Check period based on challenge type or period field

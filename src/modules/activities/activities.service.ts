@@ -73,6 +73,60 @@ export class ActivitiesService {
       this.logger.error(`Error checking badges for activity creation: ${error.message}`);
     }
 
+    // Activate challenges for user (if not already activated)
+    try {
+      this.logger.log(
+        `[ActivitiesService] Activating challenges for user ${userId} after activity creation`,
+      );
+      await this.challengeService.activateChallengesForUser(userId);
+    } catch (error) {
+      this.logger.error(
+        `Error activating challenges for activity creation: ${error.message}`,
+      );
+    }
+
+    // Update challenges (pour les challenges qui comptent la création d'activité)
+    // Important: Pour les challenges quotidiens, on utilise la date de création (aujourd'hui)
+    const creationDate = new Date(); // Date actuelle = date de création
+    try {
+      this.logger.log(
+        `[ActivitiesService] ========================================`,
+      );
+      this.logger.log(
+        `[ActivitiesService] 🎯 UPDATING CHALLENGE PROGRESS for user ${userId} after activity CREATION`,
+      );
+      this.logger.log(
+        `[ActivitiesService] Creation date: ${creationDate.toISOString()}`,
+      );
+      this.logger.log(
+        `[ActivitiesService] Activity data: sportType=${savedActivity.sportType}, date=${savedActivity.date}`,
+      );
+      this.logger.log(
+        `[ActivitiesService] ========================================`,
+      );
+
+      await this.challengeService.updateChallengeProgress(userId, 'create_activity', {
+        activity: {
+          sportType: savedActivity.sportType,
+          date: creationDate, // Utiliser la date de création pour les challenges quotidiens
+          time: creationDate, // Utiliser la date de création
+          createdAt: creationDate, // Date de création explicite
+          durationMinutes: 0, // Pas encore complétée
+          distanceKm: 0, // Pas encore complétée
+        },
+      });
+
+      this.logger.log(
+        `[ActivitiesService] ✅ Challenge progress update completed for user ${userId} after activity creation`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[ActivitiesService] ❌ ERROR updating challenge progress for user ${userId} after activity creation: ${error.message}`,
+        error.stack,
+      );
+      // Ne pas bloquer la création d'activité si la mise à jour des challenges échoue
+    }
+
     return savedActivity;
   }
 
