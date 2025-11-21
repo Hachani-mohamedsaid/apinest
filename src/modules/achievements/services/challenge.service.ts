@@ -97,18 +97,28 @@ export class ChallengeService {
         // Check if this action counts toward the challenge
         const shouldCount = await this.doesActionCount(actionType, challenge.unlockCriteria, context);
         if (!shouldCount) {
+          this.logger.debug(
+            `Challenge "${challenge.name}" does not count for action ${actionType} (user ${userId})`,
+          );
           continue;
         }
 
         // Update progress based on challenge type
+        const oldProgress = userChallenge.currentProgress || 0;
         const progressIncrement = await this.calculateProgressIncrement(
           actionType,
           challenge.unlockCriteria,
           context,
         );
 
-        userChallenge.currentProgress = (userChallenge.currentProgress || 0) + progressIncrement;
-        await userChallenge.save();
+        if (progressIncrement > 0) {
+          userChallenge.currentProgress = oldProgress + progressIncrement;
+          await userChallenge.save();
+
+          this.logger.log(
+            `Challenge progress updated for user ${userId}: "${challenge.name}" - ${oldProgress} -> ${userChallenge.currentProgress}/${userChallenge.targetCount}`,
+          );
+        }
 
         // Check if challenge is completed
         if (userChallenge.currentProgress >= userChallenge.targetCount) {
@@ -246,8 +256,11 @@ export class ChallengeService {
       return false;
     }
 
-    // Get activity date
-    const activityDate = new Date(activity.date || activity.time || new Date());
+    // Get activity date - prioritize completedAt (date of completion) for daily challenges
+    // For daily challenges, we need the completion date, not the creation date
+    const activityDate = new Date(
+      activity.completedAt || activity.date || activity.time || new Date()
+    );
     const now = new Date();
 
     // Check period based on challenge type or period field

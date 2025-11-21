@@ -387,11 +387,15 @@ export class ActivitiesService {
       await this.challengeService.activateChallengesForUser(participantIdStr);
 
       // Update challenges (avec les informations détaillées)
+      // Important: Pour les challenges quotidiens, on utilise la date de complétion (aujourd'hui)
+      // pas la date de création de l'activité
+      const completionDate = new Date(); // Date actuelle = date de complétion
       await this.challengeService.updateChallengeProgress(participantIdStr, 'complete_activity', {
         activity: {
           sportType: activity.sportType,
-          date: activityDate,
-          time: activity.time,
+          date: completionDate, // Utiliser la date de complétion pour les challenges quotidiens
+          time: completionDate, // Utiliser la date de complétion
+          completedAt: completionDate, // Date de complétion explicite
           durationMinutes: defaultDuration,
           distanceKm: defaultDistance,
         },
