@@ -7,6 +7,7 @@ import { Activity, ActivitySchema } from '../activities/schemas/activity.schema'
 import { Like, LikeSchema } from './schemas/like.schema';
 import { Match, MatchSchema } from './schemas/match.schema';
 import { Pass, PassSchema } from './schemas/pass.schema';
+import { AchievementsModule } from '../achievements/achievements.module';
 
 @Module({
   imports: [
@@ -17,6 +18,7 @@ import { Pass, PassSchema } from './schemas/pass.schema';
       { name: Match.name, schema: MatchSchema },
       { name: Pass.name, schema: PassSchema },
     ]),
+    AchievementsModule, // Pour accéder à NotificationService
   ],
   controllers: [QuickMatchController],
   providers: [QuickMatchService],

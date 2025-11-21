@@ -9,6 +9,8 @@ export enum NotificationType {
   CHALLENGE_COMPLETED = 'challenge_completed',
   XP_EARNED = 'xp_earned',
   STREAK_UPDATED = 'streak_updated',
+  LIKE_RECEIVED = 'like_received',
+  MATCH_MADE = 'match_made',
 }
 
 @Schema({ timestamps: true })

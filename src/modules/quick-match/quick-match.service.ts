@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   ConflictException,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -10,15 +11,20 @@ import { Activity, ActivityDocument } from '../activities/schemas/activity.schem
 import { Like, LikeDocument } from './schemas/like.schema';
 import { Match, MatchDocument } from './schemas/match.schema';
 import { Pass, PassDocument } from './schemas/pass.schema';
+import { NotificationService } from '../achievements/services/notification.service';
+import { NotificationType } from '../achievements/schemas/notification.schema';
 
 @Injectable()
 export class QuickMatchService {
+  private readonly logger = new Logger(QuickMatchService.name);
+
   constructor(
     @InjectModel(User.name) private userModel: Model<UserDocument>,
     @InjectModel(Activity.name) private activityModel: Model<ActivityDocument>,
     @InjectModel(Like.name) private likeModel: Model<LikeDocument>,
     @InjectModel(Match.name) private matchModel: Model<MatchDocument>,
     @InjectModel(Pass.name) private passModel: Model<PassDocument>,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -326,7 +332,39 @@ export class QuickMatchService {
     });
     await like.save();
 
-    // Si c'est un match, créer l'enregistrement Match
+    // Créer une notification pour l'utilisateur qui a été liké
+    try {
+      this.logger.log(
+        `[QuickMatch] Creating like notification: ${user.name} liked ${profile.name}'s profile`,
+      );
+
+      await this.notificationService.createNotification(
+        profileId, // L'utilisateur qui a été liké
+        NotificationType.LIKE_RECEIVED,
+        isMatch ? '🎉 Nouveau Match !' : '💕 Nouveau Like !',
+        isMatch
+          ? `${user.name} a liké votre profil - C'est un match ! 🎉`
+          : `${user.name} a liké votre profil`,
+        {
+          likedBy: userId,
+          likedByName: user.name || user.email,
+          likedByAvatar: user.profileImageUrl || user.profileImageThumbnailUrl,
+          isMatch: isMatch,
+        },
+      );
+
+      this.logger.log(
+        `[QuickMatch] ✅ Like notification created for user ${profileId}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[QuickMatch] ❌ Error creating like notification: ${error.message}`,
+        error.stack,
+      );
+      // Ne pas bloquer le like si la notification échoue
+    }
+
+    // Si c'est un match, créer l'enregistrement Match et les notifications de match
     if (isMatch) {
       // Mettre à jour le like inverse
       reverseLike.isMatch = true;
@@ -343,13 +381,72 @@ export class QuickMatchService {
         })
         .exec();
 
+      let matchDocument: MatchDocument | null = null;
+
       if (!existingMatch) {
-        const match = new this.matchModel({
+        matchDocument = new this.matchModel({
           user1: new Types.ObjectId(user1Id),
           user2: new Types.ObjectId(user2Id),
           hasChatted: false,
         });
-        await match.save();
+        await matchDocument.save();
+        this.logger.log(
+          `[QuickMatch] ✅ Match created between ${user1Id} and ${user2Id}`,
+        );
+      } else {
+        matchDocument = existingMatch;
+        this.logger.log(
+          `[QuickMatch] Match already exists between ${user1Id} and ${user2Id}`,
+        );
+      }
+
+      // Créer des notifications de match pour les deux utilisateurs
+      try {
+        const matchId = matchDocument._id.toString();
+        const otherUserId = userId === user1Id ? user2Id : user1Id;
+        const otherUser = userId === user1Id ? profile : user;
+
+        this.logger.log(
+          `[QuickMatch] Creating match notifications for both users`,
+        );
+
+        // Notification pour l'utilisateur actuel
+        await this.notificationService.createNotification(
+          userId,
+          NotificationType.MATCH_MADE,
+          '🎉 Nouveau Match !',
+          `Vous avez un nouveau match avec ${profile.name} !`,
+          {
+            matchId: matchId,
+            matchedUserId: profileId,
+            matchedUserName: profile.name || profile.email,
+            matchedUserAvatar: profile.profileImageUrl || profile.profileImageThumbnailUrl,
+          },
+        );
+
+        // Notification pour l'autre utilisateur
+        await this.notificationService.createNotification(
+          profileId,
+          NotificationType.MATCH_MADE,
+          '🎉 Nouveau Match !',
+          `Vous avez un nouveau match avec ${user.name} !`,
+          {
+            matchId: matchId,
+            matchedUserId: userId,
+            matchedUserName: user.name || user.email,
+            matchedUserAvatar: user.profileImageUrl || user.profileImageThumbnailUrl,
+          },
+        );
+
+        this.logger.log(
+          `[QuickMatch] ✅ Match notifications created for both users`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[QuickMatch] ❌ Error creating match notifications: ${error.message}`,
+          error.stack,
+        );
+        // Ne pas bloquer le match si les notifications échouent
       }
     }
 
