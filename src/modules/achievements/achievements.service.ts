@@ -80,8 +80,14 @@ export class AchievementsService {
    * Get user badges (earned and in progress)
    */
   async getBadges(userId: string): Promise<BadgesResponseDto> {
+    this.logger.log(`[AchievementsService] getBadges called for user ${userId}`);
+    
     const earnedBadges = await this.badgeService.getUserBadges(userId);
     const inProgress = await this.badgeService.getBadgeProgress(userId);
+
+    this.logger.log(
+      `[AchievementsService] Found ${earnedBadges.length} earned badges and ${inProgress.length} in progress`,
+    );
 
     return {
       earnedBadges: earnedBadges.map((ub: any) => ({

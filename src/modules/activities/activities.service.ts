@@ -61,6 +61,19 @@ export class ActivitiesService {
 
     // Vérifier et débloquer les badges de création d'activité
     try {
+      this.logger.log(
+        `[ActivitiesService] ========================================`,
+      );
+      this.logger.log(
+        `[ActivitiesService] 🏆 CHECKING BADGES for user ${userId} after activity creation`,
+      );
+      this.logger.log(
+        `[ActivitiesService] Activity: sportType=${savedActivity.sportType}, isHost=true`,
+      );
+      this.logger.log(
+        `[ActivitiesService] ========================================`,
+      );
+      
       await this.badgeService.checkAndAwardBadges(userId, 'activity_created', {
         action: 'create_activity',
         activity: {
@@ -68,9 +81,16 @@ export class ActivitiesService {
           isHost: true,
         },
       });
+      
+      this.logger.log(
+        `[ActivitiesService] ✅ Badge check completed for user ${userId}`,
+      );
     } catch (error) {
       // Ne pas bloquer la création si la vérification de badge échoue
-      this.logger.error(`Error checking badges for activity creation: ${error.message}`);
+      this.logger.error(
+        `[ActivitiesService] ❌ ERROR checking badges for activity creation: ${error.message}`,
+        error.stack,
+      );
     }
 
     // Activate challenges for user (if not already activated)

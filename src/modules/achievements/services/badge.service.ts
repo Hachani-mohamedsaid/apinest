@@ -40,24 +40,58 @@ export class BadgeService {
     context?: Record<string, any>,
   ): Promise<void> {
     try {
+      this.logger.log(
+        `[BadgeService] Checking badges for user ${userId}, triggerType: ${triggerType}`,
+      );
+      
       // Get all active badges
       const badges = await this.badgeDefinitionModel.find({ isActive: true }).exec();
+      
+      this.logger.log(
+        `[BadgeService] Found ${badges.length} active badges to check`,
+      );
 
       for (const badge of badges) {
+        this.logger.debug(
+          `[BadgeService] Checking badge: "${badge.name}" (id: ${badge._id}, criteriaType: ${badge.unlockCriteria?.type})`,
+        );
+        
         // Skip if user already has this badge
         const hasBadge = await this.userHasBadge(userId, badge._id.toString());
         if (hasBadge) {
+          this.logger.debug(
+            `[BadgeService] User ${userId} already has badge "${badge.name}", skipping`,
+          );
           continue;
         }
 
         // Check if badge criteria is met
         const criteriaMet = await this.checkBadgeCriteria(userId, badge.unlockCriteria, context);
+        
+        this.logger.log(
+          `[BadgeService] Badge "${badge.name}": criteriaMet=${criteriaMet}`,
+        );
+        
         if (criteriaMet) {
+          this.logger.log(
+            `[BadgeService] 🎉 Criteria met! Awarding badge "${badge.name}" to user ${userId}`,
+          );
           await this.awardBadge(userId, badge._id.toString());
+        } else {
+          this.logger.debug(
+            `[BadgeService] Criteria not met for badge "${badge.name}"`,
+          );
         }
       }
+      
+      this.logger.log(
+        `[BadgeService] ✅ Badge check completed for user ${userId}`,
+      );
     } catch (error) {
-      this.logger.error(`Error checking badges for user ${userId}: ${error.message}`);
+      this.logger.error(
+        `[BadgeService] ❌ ERROR checking badges for user ${userId}: ${error.message}`,
+        error.stack,
+      );
     }
   }
 
@@ -184,10 +218,18 @@ export class BadgeService {
   ): Promise<boolean> {
     const requiredCount = criteria.count || 0;
     
+    this.logger.log(
+      `[BadgeService] checkActivityCreationCount: userId=${userId}, requiredCount=${requiredCount}, context.action=${context?.action}`,
+    );
+    
     // 1. Compter les activités complétées où l'utilisateur était hôte (via ActivityLog)
     const completedHostCount = await this.activityLogModel
       .countDocuments({ userId, isHost: true })
       .exec();
+    
+    this.logger.log(
+      `[BadgeService] Completed host activities count: ${completedHostCount}`,
+    );
     
     // 2. Compter les activités créées mais non encore complétées (via Activity model)
     // Ce sont les activités où creator = userId et isCompleted = false ou null
@@ -201,17 +243,37 @@ export class BadgeService {
       })
       .exec();
     
+    this.logger.log(
+      `[BadgeService] Pending activities count: ${pendingActivitiesCount}`,
+    );
+    
     // 3. Total des activités créées = complétées + en attente
     const totalCreated = completedHostCount + pendingActivitiesCount;
     
+    this.logger.log(
+      `[BadgeService] Total activities created: ${totalCreated} (completed: ${completedHostCount} + pending: ${pendingActivitiesCount})`,
+    );
+    
     // 4. Si c'est une création d'activité en cours (dans le context), inclure cette nouvelle création
     if (context?.action === 'create_activity') {
+      const totalWithNew = totalCreated + 1;
+      this.logger.log(
+        `[BadgeService] Including new activity: totalWithNew=${totalWithNew}, requiredCount=${requiredCount}`,
+      );
       // Le badge sera débloqué si total + 1 >= requiredCount
-      return (totalCreated + 1) >= requiredCount;
+      const result = totalWithNew >= requiredCount;
+      this.logger.log(
+        `[BadgeService] checkActivityCreationCount result: ${result} (${totalWithNew} >= ${requiredCount})`,
+      );
+      return result;
     }
     
     // Sinon, vérifier avec le total actuel
-    return totalCreated >= requiredCount;
+    const result = totalCreated >= requiredCount;
+    this.logger.log(
+      `[BadgeService] checkActivityCreationCount result: ${result} (${totalCreated} >= ${requiredCount})`,
+    );
+    return result;
   }
 
   /**
@@ -284,45 +346,83 @@ export class BadgeService {
    */
   async awardBadge(userId: string, badgeId: string): Promise<void> {
     try {
+      this.logger.log(
+        `[BadgeService] awardBadge called: userId=${userId}, badgeId=${badgeId}`,
+      );
+      
       // Check if already has badge
       const existing = await this.userBadgeModel.findOne({ userId, badgeId }).exec();
       if (existing) {
+        this.logger.warn(
+          `[BadgeService] User ${userId} already has badge ${badgeId}, skipping`,
+        );
         return;
       }
 
       // Get badge definition for XP reward
       const badge = await this.badgeDefinitionModel.findById(badgeId).exec();
       if (!badge) {
-        this.logger.warn(`Badge ${badgeId} not found`);
+        this.logger.warn(`[BadgeService] Badge ${badgeId} not found in database`);
         return;
       }
 
+      this.logger.log(
+        `[BadgeService] Badge found: "${badge.name}" (rarity: ${badge.rarity}, xpReward: ${badge.xpReward})`,
+      );
+
       // Create user badge entry
+      this.logger.log(
+        `[BadgeService] Creating UserBadge entry for user ${userId}, badge ${badgeId}`,
+      );
+      
       await this.userBadgeModel.create({
         userId,
         badgeId,
         earnedAt: new Date(),
       });
 
+      this.logger.log(
+        `[BadgeService] ✅ UserBadge entry created successfully`,
+      );
+
       // Award XP based on badge rarity
       const xpReward = this.xpService.getBadgeXpReward(badge.rarity, badge.xpReward);
+      this.logger.log(
+        `[BadgeService] Awarding ${xpReward} XP to user ${userId} for badge "${badge.name}"`,
+      );
+      
       await this.xpService.addXp(userId, xpReward, 'earn_badge');
 
       // Create notification for badge unlocked
       try {
+        this.logger.log(
+          `[BadgeService] Creating notification for badge unlock`,
+        );
+        
         await this.notificationService.createBadgeUnlockedNotification(
           userId,
           badge.name,
           badgeId,
           xpReward,
         );
+        
+        this.logger.log(
+          `[BadgeService] ✅ Notification created successfully`,
+        );
       } catch (error) {
-        this.logger.warn(`Failed to create notification for badge unlock: ${error.message}`);
+        this.logger.warn(
+          `[BadgeService] ⚠️ Failed to create notification for badge unlock: ${error.message}`,
+        );
       }
 
-      this.logger.log(`Badge "${badge.name}" awarded to user ${userId} with ${xpReward} XP`);
+      this.logger.log(
+        `[BadgeService] 🎉 Badge "${badge.name}" successfully awarded to user ${userId} with ${xpReward} XP`,
+      );
     } catch (error) {
-      this.logger.error(`Error awarding badge to user ${userId}: ${error.message}`);
+      this.logger.error(
+        `[BadgeService] ❌ ERROR awarding badge to user ${userId}: ${error.message}`,
+        error.stack,
+      );
       throw error;
     }
   }
@@ -339,11 +439,27 @@ export class BadgeService {
    * Get all badges earned by user
    */
   async getUserBadges(userId: string): Promise<UserBadgeDocument[]> {
-    return this.userBadgeModel
+    this.logger.debug(`[BadgeService] getUserBadges called for user ${userId}`);
+    
+    const userBadges = await this.userBadgeModel
       .find({ userId })
       .populate('badgeId')
       .sort({ earnedAt: -1 })
       .exec();
+    
+    this.logger.log(
+      `[BadgeService] Found ${userBadges.length} badges for user ${userId}`,
+    );
+    
+    if (userBadges.length > 0) {
+      userBadges.forEach((ub: any) => {
+        this.logger.debug(
+          `[BadgeService] User badge: ${ub.badgeId?.name || 'Unknown'} (earnedAt: ${ub.earnedAt})`,
+        );
+      });
+    }
+    
+    return userBadges;
   }
 
   /**
