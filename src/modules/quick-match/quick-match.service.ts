@@ -155,35 +155,24 @@ export class QuickMatchService {
       // Utiliser $in avec les valeurs exactes (case-insensitive) puis faire un filtrage flexible après
       // Mais pour une recherche flexible maintenant, utiliser $or avec regex
       
-      // Normaliser tous les sports pour la recherche (lowercase, trim)
-      const normalizedSports = allUserSports.map((sport) =>
-        sport.toLowerCase().trim(),
-      );
+      // Nettoyer les sports (trim) pour la recherche
+      const cleanedSports = allUserSports.map((sport) => sport.trim()).filter(Boolean);
       
-      // Créer des conditions $or pour chaque sport avec regex (case-insensitive)
-      // MongoDB $regex sur un array teste automatiquement chaque élément de l'array
-      query.$or = normalizedSports.map((normalizedSport) => {
-        // Escaper les caractères spéciaux pour le regex
-        const escapedSport = normalizedSport.replace(
-          /[.*+?^${}()|[\]\\]/g,
-          '\\$&',
-        );
-        // Chercher dans l'array avec regex case-insensitive
-        return {
-          sportsInterests: {
-            $regex: new RegExp(`^${escapedSport}$`, 'i'),
-          },
-        };
-      });
+      // Utiliser $in directement sur l'array pour une recherche plus simple et fiable
+      // MongoDB $in cherche si au moins un élément de l'array correspond à une valeur dans la liste
+      // On utilise les valeurs exactes (avec casse) car MongoDB fait la comparaison exacte
+      query.sportsInterests = {
+        $in: allUserSports.map((sport) => sport.trim()).filter(Boolean), // Recherche exacte dans l'array
+      };
       
       this.logger.log(
         `[QuickMatch] Searching for users with sports matching: ${JSON.stringify(allUserSports)}`,
       );
       this.logger.log(
-        `[QuickMatch] Normalized sports for query: ${JSON.stringify(normalizedSports)}`,
+        `[QuickMatch] Using $in query with ${cleanedSports.length} sports: ${JSON.stringify(cleanedSports.slice(0, 5))}${cleanedSports.length > 5 ? '...' : ''}`,
       );
       this.logger.log(
-        `[QuickMatch] MongoDB query: $or with ${normalizedSports.length} sports conditions`,
+        `[QuickMatch] MongoDB query: sportsInterests $in with ${cleanedSports.length} sports`,
       );
     }
 
