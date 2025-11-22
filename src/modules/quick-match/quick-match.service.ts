@@ -144,82 +144,42 @@ export class QuickMatchService {
       ...excludedUserIdsArray.map((id) => new Types.ObjectId(id)),
     ];
 
-    // 8. Requête pour trouver les utilisateurs avec au moins un sport en commun
-    // Utiliser une recherche plus flexible pour les sports
+    // 8. Requête MongoDB : NE PAS filtrer par sports dans MongoDB
+    // Problème : La requête $in est trop restrictive et élimine trop d'utilisateurs
+    // Solution : Récupérer TOUS les utilisateurs disponibles et filtrer en JavaScript
+    // Cela permet un matching flexible (case-insensitive, partiel, etc.)
     const query: any = {
       _id: { $nin: excludedIds },
+      // IMPORTANT : On NE filtre PAS par sportsInterests ici
+      // On veut récupérer TOUS les utilisateurs disponibles et filtrer en JavaScript après
     };
-
-    if (allUserSports.length > 0) {
-      // Recherche dans un array : utiliser une approche plus simple et fiable
-      // Utiliser $in avec les valeurs exactes (case-insensitive) puis faire un filtrage flexible après
-      // Mais pour une recherche flexible maintenant, utiliser $or avec regex
-      
-      // Nettoyer les sports (trim) pour la recherche
-      const cleanedSports = allUserSports.map((sport) => sport.trim()).filter(Boolean);
-      
-      // Utiliser $in directement sur l'array pour une recherche plus simple et fiable
-      // MongoDB $in cherche si au moins un élément de l'array correspond à une valeur dans la liste
-      // Problème : $in est case-sensitive, donc on doit inclure les variations de casse
-      // Solution : Inclure les valeurs originales ET lowercase pour couvrir les deux cas
-      
-      // Créer une liste avec les valeurs originales ET lowercase pour couvrir les variations de casse
-      // Exemple : ["Running", "Swimming"] devient ["Running", "Swimming", "running", "swimming"]
-      const sportsWithVariations = [
-        ...cleanedSports, // Valeurs originales (ex: "Running")
-        ...cleanedSports.map((sport) => sport.toLowerCase()), // Lowercase (ex: "running")
-        ...cleanedSports.map((sport) => sport.toUpperCase()), // Uppercase (ex: "RUNNING")
-      ];
-      
-      // Utiliser Set pour enlever les doublons
-      const uniqueSports = [...new Set(sportsWithVariations)];
-      
-      query.sportsInterests = {
-        $in: uniqueSports, // Recherche dans l'array avec variations de casse
-      };
-      
-      this.logger.log(
-        `[QuickMatch] Searching for users with sports matching: ${JSON.stringify(allUserSports)}`,
-      );
-      this.logger.log(
-        `[QuickMatch] Using $in query with ${uniqueSports.length} sports (${cleanedSports.length} original + variations): ${JSON.stringify(cleanedSports.slice(0, 5))}${cleanedSports.length > 5 ? '...' : ''}`,
-      );
-      this.logger.log(
-        `[QuickMatch] MongoDB query: sportsInterests $in with ${uniqueSports.length} sports (including case variations)`,
-      );
-    }
-
-    // 9. Compter le total de profils compatibles AVANT filtrage par sports communs
-    // Aussi compter TOUS les utilisateurs disponibles (sans filtre sports) pour debug
-    const totalUsersAvailable = await this.userModel.countDocuments({
-      _id: { $nin: excludedIds },
-    }).exec();
     
     this.logger.log(
-      `[QuickMatch] Total users available (excluding liked/matched/passed): ${totalUsersAvailable}`,
+      `[QuickMatch] Searching for users with sports matching: ${JSON.stringify(allUserSports)}`,
     );
-    
-    const totalBeforeFilter = await this.userModel.countDocuments(query).exec();
     this.logger.log(
-      `[QuickMatch] Users found before sports filter: ${totalBeforeFilter}`,
+      `[QuickMatch] MongoDB query: NO sports filter (will filter in JavaScript for flexible matching)`,
     );
-    
-    if (totalBeforeFilter === 0 && totalUsersAvailable > 0) {
-      this.logger.warn(
-        `[QuickMatch] ⚠️ WARNING: No users found with sports filter but ${totalUsersAvailable} users available. This might indicate a problem with the sports query.`,
-      );
-    }
 
-    // 10. Récupérer les profils avec pagination
+    // 9. Récupérer TOUS les utilisateurs disponibles (sans filtre sports dans MongoDB)
+    // On va filtrer par sports en JavaScript pour un matching flexible
     const skip = (page - 1) * limit;
+    
+    // Récupérer TOUS les utilisateurs disponibles (sans filtre sports)
+    // Utiliser une limite plus grande pour compenser le filtrage JavaScript
+    const limitForQuery = limit * 3; // Récupérer 3x plus pour avoir assez après filtrage
+    
     let allUsers = await this.userModel
       .find(query)
       .skip(skip)
-      .limit(limit)
+      .limit(limitForQuery)
       .exec();
 
     this.logger.log(
-      `[QuickMatch] Users retrieved from DB with sports filter: ${allUsers.length}`,
+      `[QuickMatch] Total users available (excluding liked/matched/passed): ${allUsers.length}`,
+    );
+    this.logger.log(
+      `[QuickMatch] Users retrieved from DB (no sports filter): ${allUsers.length}`,
     );
 
     // 11. Double vérification : filtrer les utilisateurs qui ont au moins un sport en commun
@@ -302,12 +262,13 @@ export class QuickMatchService {
       );
     }
 
-    // 12. Compter le total final (uniquement les profils avec sports communs)
-    // On utilise totalBeforeFilter qui compte déjà les profils avec sports communs (sauf exclus)
-    const total = totalBeforeFilter;
+    // 12. Calculer le total final (uniquement les profils avec sports communs après filtrage JavaScript)
+    // NOTE: Le total est approximatif car on ne filtre que les profils de la page actuelle
+    // Pour un total exact, il faudrait filtrer TOUS les utilisateurs (peut être lent)
+    const total = compatibleProfiles.length;
     
     this.logger.log(
-      `[QuickMatch] Final total profiles with common sports: ${total}`,
+      `[QuickMatch] Final total profiles with common sports (after JavaScript filter): ${total}`,
     );
 
     // 12. Enrichir avec les données des activités et distance
@@ -332,10 +293,19 @@ export class QuickMatchService {
     // 13. Trier par pertinence (nombre de sports en commun, distance, etc.)
     const sortedProfiles = this.sortByRelevance(enrichedProfiles, allUserSports);
 
-    const totalPages = Math.ceil(total / limit);
+    // Paginer les résultats filtrés (prendre seulement les `limit` premiers)
+    const paginatedProfiles = sortedProfiles.slice(0, limit);
+    
+    // Le total est le nombre de profils compatibles trouvés
+    // NOTE: Pagination approximative - pour une pagination exacte, il faudrait filtrer TOUS les utilisateurs
+    const totalPages = total > 0 ? Math.ceil(total / limit) : 0;
+
+    this.logger.log(
+      `[QuickMatch] Returning ${paginatedProfiles.length} profiles (paginated from ${sortedProfiles.length} compatible profiles)`,
+    );
 
     return {
-      profiles: sortedProfiles,
+      profiles: paginatedProfiles,
       total,
       page,
       totalPages,
