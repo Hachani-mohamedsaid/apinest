@@ -160,19 +160,32 @@ export class QuickMatchService {
       
       // Utiliser $in directement sur l'array pour une recherche plus simple et fiable
       // MongoDB $in cherche si au moins un élément de l'array correspond à une valeur dans la liste
-      // On utilise les valeurs exactes (avec casse) car MongoDB fait la comparaison exacte
+      // Problème : $in est case-sensitive, donc on doit inclure les variations de casse
+      // Solution : Inclure les valeurs originales ET lowercase pour couvrir les deux cas
+      
+      // Créer une liste avec les valeurs originales ET lowercase pour couvrir les variations de casse
+      // Exemple : ["Running", "Swimming"] devient ["Running", "Swimming", "running", "swimming"]
+      const sportsWithVariations = [
+        ...cleanedSports, // Valeurs originales (ex: "Running")
+        ...cleanedSports.map((sport) => sport.toLowerCase()), // Lowercase (ex: "running")
+        ...cleanedSports.map((sport) => sport.toUpperCase()), // Uppercase (ex: "RUNNING")
+      ];
+      
+      // Utiliser Set pour enlever les doublons
+      const uniqueSports = [...new Set(sportsWithVariations)];
+      
       query.sportsInterests = {
-        $in: allUserSports.map((sport) => sport.trim()).filter(Boolean), // Recherche exacte dans l'array
+        $in: uniqueSports, // Recherche dans l'array avec variations de casse
       };
       
       this.logger.log(
         `[QuickMatch] Searching for users with sports matching: ${JSON.stringify(allUserSports)}`,
       );
       this.logger.log(
-        `[QuickMatch] Using $in query with ${cleanedSports.length} sports: ${JSON.stringify(cleanedSports.slice(0, 5))}${cleanedSports.length > 5 ? '...' : ''}`,
+        `[QuickMatch] Using $in query with ${uniqueSports.length} sports (${cleanedSports.length} original + variations): ${JSON.stringify(cleanedSports.slice(0, 5))}${cleanedSports.length > 5 ? '...' : ''}`,
       );
       this.logger.log(
-        `[QuickMatch] MongoDB query: sportsInterests $in with ${cleanedSports.length} sports`,
+        `[QuickMatch] MongoDB query: sportsInterests $in with ${uniqueSports.length} sports (including case variations)`,
       );
     }
 
