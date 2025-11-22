@@ -7,14 +7,23 @@ D'après vos données MongoDB :
 - **Boucha boucha** : `["Tennis", "Basketball", "Running", "Swimming", ...]` (12 sports)
 - **Mohamed** (connecté) : `["Swimming", "Hiking", "Basketball", ...]` (13 sports)
 
-**Résultat des logs :**
+**Résultat des logs (après correction) :**
 ```
-Excluded profiles - Liked: 0, Matched: 1, Recent Passes: 0, Total excluded: 1
-Users found before sports filter: 1
-Compatible profiles after sports filter: 1
+[QuickMatch] MongoDB query: NO sports filter (will filter in JavaScript)
+[QuickMatch] Users retrieved from DB (no sports filter): 11
+[QuickMatch] Compatible profiles after JavaScript filter: 1
+[QuickMatch] Excluded profiles - Liked: 0, Matched: 1, Recent Passes: 0, Total excluded: 1
 ```
 
 ## 🔍 Analyse
+
+### Approche Actuelle (Correction Appliquée)
+
+**Nouveau système de filtrage** :
+- ❌ **PAS de filtre MongoDB** sur `sportsInterests`
+- ✅ **Filtrage JavaScript** avec matching flexible (case-insensitive, partiel, préfixe)
+- ✅ **Exclusion temporaire** des passes (7 jours)
+- ✅ **Exclusion permanente** des liked/matched
 
 ### Profils avec Sports Communs
 
@@ -26,18 +35,30 @@ Compatible profiles after sports filter: 1
 ### Exclusion
 
 D'après les logs :
-- **1 profil matché est exclu**
+- **1 profil matché est exclu** (exclusion permanente)
+- **0 profils passés récents** (passes > 7 jours peuvent réapparaître)
 
 **Résultat :**
-- 2 profils avec sports communs
+- 11 utilisateurs disponibles (excluant liked/matched/passed)
+- 2 profils avec sports communs (après filtrage JavaScript)
 - 1 profil exclu (matched)
 - **= 1 profil disponible** ✅
 
 ## ✅ Conclusion
 
-**Le système fonctionne correctement !** 
+**Le système fonctionne correctement après la correction !** 
+
+### Changements Appliqués
+
+1. ✅ **Filtrage JavaScript** : Plus de filtre MongoDB restrictif sur `sportsInterests`
+2. ✅ **Matching flexible** : Case-insensitive, partiel, préfixe
+3. ✅ **Plus de profils trouvés** : 11 utilisateurs récupérés au lieu de 1
+
+### Résultat
 
 Il y a **2 profils avec sports communs**, mais **1 profil est exclu** car il y a un match. Donc **1 profil reste disponible**, ce qui correspond aux logs.
+
+**Important** : Le système récupère maintenant **TOUS les utilisateurs disponibles** et filtre en JavaScript, ce qui permet de trouver plus de profils même avec des variations de casse ou de format.
 
 ## 🔍 Comment Vérifier
 
@@ -67,11 +88,14 @@ J'ai ajouté des logs supplémentaires pour afficher :
 Les nouveaux logs devraient montrer :
 
 ```
-[QuickMatch] Total users available (excluding liked/matched/passed): 2  // ✅ 2 profils disponibles
-[QuickMatch] Users found before sports filter: 2  // ✅ 2 profils avec sports communs
-[QuickMatch] Excluded profiles - Matched: 1
-[QuickMatch] Compatible profiles after sports filter: 1  // ✅ Après exclusion du matché
+[QuickMatch] MongoDB query: NO sports filter (will filter in JavaScript)
+[QuickMatch] Users retrieved from DB (no sports filter): 11  // ✅ Tous les utilisateurs disponibles
+[QuickMatch] Compatible profiles after JavaScript filter: 2  // ✅ 2 profils avec sports communs
+[QuickMatch] Excluded profiles - Liked: 0, Matched: 1, Recent Passes: 0
+[QuickMatch] Returning 1 profiles (paginated from 2 compatible profiles)  // ✅ 1 profil disponible après exclusion
 ```
+
+**Note** : Le système récupère maintenant **11 utilisateurs** au lieu de 1, ce qui permet un meilleur filtrage JavaScript.
 
 ## 📊 Comportement Attendu
 

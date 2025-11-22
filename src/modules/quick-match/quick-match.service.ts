@@ -89,15 +89,19 @@ export class QuickMatchService {
       return { profiles: [], total: 0, page, totalPages: 0 };
     }
 
-    // 6. Récupérer les IDs des profils déjà likés, matchés, ou passés récemment
-    // Exclure les profils passés récents (7 derniers jours) pour éviter qu'ils réapparaissent immédiatement
-    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
-    
-    const [likedProfiles, matchedProfiles, recentPasses] = await Promise.all([
+    // 6. Récupérer les IDs des profils à exclure
+    const [likedProfiles, passedProfiles, matchedProfiles] = await Promise.all([
+      // Profils déjà likés
       this.likeModel
         .find({ fromUser: new Types.ObjectId(userId) })
         .select('toUser')
         .exec(),
+      // Profils déjà passés
+      this.passModel
+        .find({ fromUser: new Types.ObjectId(userId) })
+        .select('toUser')
+        .exec(),
+      // Profils déjà matchés
       this.matchModel
         .find({
           $or: [
@@ -107,19 +111,18 @@ export class QuickMatchService {
         })
         .select('user1 user2')
         .exec(),
-      this.passModel
-        .find({
-          fromUser: new Types.ObjectId(userId),
-          createdAt: { $gte: sevenDaysAgo }, // Seulement les passes récents (7 derniers jours)
-        })
-        .select('toUser')
-        .exec(),
     ]);
 
+    // 7. Construire la liste des IDs à exclure
     const excludedUserIds = new Set<string>();
-    // Exclure les profils déjà likés (toujours exclus)
+    
+    // Ajouter les profils likés
     likedProfiles.forEach((like) => excludedUserIds.add(like.toUser.toString()));
-    // Exclure les profils avec lesquels on a déjà matché (toujours exclus)
+    
+    // Ajouter les profils passés
+    passedProfiles.forEach((pass) => excludedUserIds.add(pass.toUser.toString()));
+    
+    // Ajouter les profils matchés
     matchedProfiles.forEach((match) => {
       excludedUserIds.add(
         match.user1.toString() === userId
@@ -127,151 +130,54 @@ export class QuickMatchService {
           : match.user1.toString(),
       );
     });
-    // Exclure les profils passés récemment (moins de 7 jours) pour éviter qu'ils réapparaissent immédiatement
-    // Les profils passés il y a plus de 7 jours peuvent réapparaître
-    recentPasses.forEach((pass) => excludedUserIds.add(pass.toUser.toString()));
 
-    this.logger.log(
-      `[QuickMatch] Excluded profiles - Liked: ${likedProfiles.length}, Matched: ${matchedProfiles.length}, Recent Passes: ${recentPasses.length}, Total excluded: ${excludedUserIds.size}`,
-    );
-
-    // Construire la liste des IDs à exclure
-    const excludedUserIdsArray = Array.from(excludedUserIds);
-
-    // 7. Construire la requête MongoDB
+    // Construire le tableau d'IDs à exclure (incluant l'utilisateur connecté)
     const excludedIds = [
       new Types.ObjectId(userId), // Exclure l'utilisateur connecté
-      ...excludedUserIdsArray.map((id) => new Types.ObjectId(id)),
+      ...Array.from(excludedUserIds).map((id) => new Types.ObjectId(id)),
     ];
 
-    // 8. Requête MongoDB : NE PAS filtrer par sports dans MongoDB
-    // Problème : La requête $in est trop restrictive et élimine trop d'utilisateurs
-    // Solution : Récupérer TOUS les utilisateurs disponibles et filtrer en JavaScript
-    // Cela permet un matching flexible (case-insensitive, partiel, etc.)
+    // 8. Construire la requête MongoDB
     const query: any = {
-      _id: { $nin: excludedIds },
-      // IMPORTANT : On NE filtre PAS par sportsInterests ici
-      // On veut récupérer TOUS les utilisateurs disponibles et filtrer en JavaScript après
+      _id: { $nin: excludedIds }, // Exclure les IDs listés
     };
-    
-    this.logger.log(
-      `[QuickMatch] Searching for users with sports matching: ${JSON.stringify(allUserSports)}`,
-    );
-    this.logger.log(
-      `[QuickMatch] MongoDB query: NO sports filter (will filter in JavaScript for flexible matching)`,
-    );
 
-    // 9. Récupérer TOUS les utilisateurs disponibles (sans filtre sports dans MongoDB)
-    // On va filtrer par sports en JavaScript pour un matching flexible
+    // Filtrer par sports communs (au moins un sport en commun)
+    // Utiliser $in avec regex pour la recherche case-insensitive
+    if (allUserSports.length > 0) {
+      query.sportsInterests = {
+        $in: allUserSports.map((sport) => new RegExp(`^${sport}$`, 'i')),
+      };
+    }
+
+    // 9. Compter le total de profils compatibles
+    const total = await this.userModel.countDocuments(query).exec();
+
+    // 10. Récupérer les profils avec pagination
     const skip = (page - 1) * limit;
-    
-    // Récupérer TOUS les utilisateurs disponibles (sans filtre sports)
-    // Utiliser une limite plus grande pour compenser le filtrage JavaScript
-    const limitForQuery = limit * 3; // Récupérer 3x plus pour avoir assez après filtrage
-    
-    let allUsers = await this.userModel
+    const allUsers = await this.userModel
       .find(query)
       .skip(skip)
-      .limit(limitForQuery)
+      .limit(limit)
       .exec();
 
-    this.logger.log(
-      `[QuickMatch] Total users available (excluding liked/matched/passed): ${allUsers.length}`,
-    );
-    this.logger.log(
-      `[QuickMatch] Users retrieved from DB (no sports filter): ${allUsers.length}`,
-    );
-
-    // 11. Double vérification : filtrer les utilisateurs qui ont au moins un sport en commun
-    // Filtre ASSOUPLI : afficher si UN SEUL sport est en commun (matching flexible)
-    let compatibleProfiles = allUsers.filter((user) => {
+    // 11. Double vérification - Filtrer par sports communs
+    // Cette étape est importante car MongoDB regex peut ne pas être 100% précis
+    const compatibleProfiles = allUsers.filter((user) => {
       const userSports = user.sportsInterests || [];
-
-      if (userSports.length === 0) {
-        return false; // Exclure les utilisateurs sans sports
-      }
-
-      // Fonction pour normaliser un sport (enlever espaces, minuscules, caractères spéciaux)
-      const normalizeSport = (sport: string): string => {
-        return sport
-          .toLowerCase()
-          .trim()
-          .replace(/[^a-z0-9]/g, ''); // Enlever tous les caractères non alphanumériques
-      };
-
-      // Vérifier s'il y a au moins UN sport en commun (matching très flexible)
-      const hasCommonSport = allUserSports.some((sport) => {
-        const normalizedSport = normalizeSport(sport);
-        return userSports.some((userSport) => {
-          const normalizedUserSport = normalizeSport(userSport);
-          
-          // Correspondance très flexible :
-          // 1. Correspondance exacte après normalisation
-          // 2. Correspondance partielle (contient)
-          // 3. Correspondance partielle inverse (est contenu)
-          // 4. Correspondance de début de mot (prefixe)
-          return (
-            normalizedUserSport === normalizedSport ||
-            normalizedUserSport.includes(normalizedSport) ||
-            normalizedSport.includes(normalizedUserSport) ||
-            normalizedUserSport.startsWith(normalizedSport) ||
-            normalizedSport.startsWith(normalizedUserSport)
-          );
-        });
-      });
+      
+      // Vérifier s'il y a au moins un sport en commun (case-insensitive)
+      const hasCommonSport = allUserSports.some((sport) =>
+        userSports.some(
+          (userSport) =>
+            userSport.toLowerCase().trim() === sport.toLowerCase().trim(),
+        ),
+      );
 
       return hasCommonSport;
     });
-    
-    this.logger.log(
-      `[QuickMatch] Filtering profiles - UN SEUL sport en commun suffit pour afficher`,
-    );
 
-    this.logger.log(
-      `[QuickMatch] Compatible profiles after sports filter: ${compatibleProfiles.length}`,
-    );
-
-    // IMPORTANT: On retourne SEULEMENT les profils avec AU MOINS UN sport en commun
-    // Filtre assoupli : un seul sport en commun suffit pour afficher le profil
-    if (compatibleProfiles.length === 0) {
-      this.logger.warn(
-        `[QuickMatch] No profiles found with at least one common sport. User sports: ${JSON.stringify(allUserSports)}`,
-      );
-    } else {
-      this.logger.log(
-        `[QuickMatch] Found ${compatibleProfiles.length} profiles with at least one common sport (relaxed filter - one sport enough)`,
-      );
-    }
-
-    // Vérification finale : s'assurer qu'aucun profil exclu n'est présent
-    const hasExcludedProfiles = compatibleProfiles.some((profile) => {
-      const profileIdStr = profile._id.toString();
-      return excludedUserIds.has(profileIdStr) || profileIdStr === userId;
-    });
-
-    if (hasExcludedProfiles) {
-      this.logger.error(
-        `[QuickMatch] ⚠️ WARNING: Found excluded profiles in results! Filtering them out...`,
-      );
-      compatibleProfiles = compatibleProfiles.filter((profile) => {
-        const profileIdStr = profile._id.toString();
-        return !excludedUserIds.has(profileIdStr) && profileIdStr !== userId;
-      });
-      this.logger.log(
-        `[QuickMatch] After filtering excluded profiles: ${compatibleProfiles.length} profiles`,
-      );
-    }
-
-    // 12. Calculer le total final (uniquement les profils avec sports communs après filtrage JavaScript)
-    // NOTE: Le total est approximatif car on ne filtre que les profils de la page actuelle
-    // Pour un total exact, il faudrait filtrer TOUS les utilisateurs (peut être lent)
-    const total = compatibleProfiles.length;
-    
-    this.logger.log(
-      `[QuickMatch] Final total profiles with common sports (after JavaScript filter): ${total}`,
-    );
-
-    // 12. Enrichir avec les données des activités et distance
+    // 12. Enrichir avec les données supplémentaires
     const enrichedProfiles = await Promise.all(
       compatibleProfiles.map(async (user) => {
         // Compter les activités créées par cet utilisateur
@@ -290,22 +196,14 @@ export class QuickMatchService {
       }),
     );
 
-    // 13. Trier par pertinence (nombre de sports en commun, distance, etc.)
+    // 13. Trier par pertinence
     const sortedProfiles = this.sortByRelevance(enrichedProfiles, allUserSports);
 
-    // Paginer les résultats filtrés (prendre seulement les `limit` premiers)
-    const paginatedProfiles = sortedProfiles.slice(0, limit);
-    
-    // Le total est le nombre de profils compatibles trouvés
-    // NOTE: Pagination approximative - pour une pagination exacte, il faudrait filtrer TOUS les utilisateurs
-    const totalPages = total > 0 ? Math.ceil(total / limit) : 0;
-
-    this.logger.log(
-      `[QuickMatch] Returning ${paginatedProfiles.length} profiles (paginated from ${sortedProfiles.length} compatible profiles)`,
-    );
+    // 14. Calculer la pagination
+    const totalPages = Math.ceil(total / limit);
 
     return {
-      profiles: paginatedProfiles,
+      profiles: sortedProfiles,
       total,
       page,
       totalPages,
