@@ -47,15 +47,26 @@ export class ActivitiesController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Get all public activities' })
+  @ApiOperation({
+    summary: 'Get activities',
+    description:
+      'Get all public activities, or friends-only activities if visibility=friends (requires authentication)',
+  })
   @ApiQuery({
     name: 'visibility',
     required: false,
     enum: ['public', 'friends'],
-    description: 'Filter by visibility (requires auth for friends)',
+    description:
+      'Filter by visibility. "friends" requires JWT authentication and returns activities from matched users only.',
   })
-  @ApiResponse({ status: 200, description: 'List of activities retrieved successfully' })
-  @ApiResponse({ status: 403, description: 'Authentication required for friends visibility' })
+  @ApiResponse({
+    status: 200,
+    description: 'List of activities retrieved successfully',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Authentication required for friends visibility',
+  })
   async findAll(@Query('visibility') visibility?: string, @Request() req?: any) {
     const userId = req?.user?._id?.toString() || undefined;
     return this.activitiesService.findAll(visibility, userId);

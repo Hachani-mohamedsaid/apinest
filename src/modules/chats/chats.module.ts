@@ -12,6 +12,7 @@ import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
+    ConfigModule, // Import ConfigModule for ConfigService
     MongooseModule.forFeature([
       { name: Chat.name, schema: ChatSchema },
       { name: Message.name, schema: MessageSchema },

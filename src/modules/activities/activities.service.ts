@@ -4,6 +4,7 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -15,6 +16,7 @@ import { StreakService } from '../achievements/services/streak.service';
 import { BadgeService } from '../achievements/services/badge.service';
 import { ChallengeService } from '../achievements/services/challenge.service';
 import { ActivityLog, ActivityLogDocument } from '../achievements/schemas/activity-log.schema';
+import { Match, MatchDocument } from '../quick-match/schemas/match.schema';
 
 @Injectable()
 export class ActivitiesService {
@@ -23,6 +25,7 @@ export class ActivitiesService {
   constructor(
     @InjectModel(Activity.name) private activityModel: Model<ActivityDocument>,
     @InjectModel(ActivityLog.name) private activityLogModel: Model<ActivityLogDocument>,
+    @InjectModel(Match.name) private matchModel: Model<MatchDocument>,
     private readonly xpService: XpService,
     private readonly streakService: StreakService,
     private readonly badgeService: BadgeService,
@@ -168,26 +171,89 @@ export class ActivitiesService {
   }
 
   async findAll(visibility?: string, userId?: string): Promise<ActivityDocument[]> {
-    const query: any = {};
-
-    // If visibility filter is provided
     if (visibility === 'friends') {
-      // For friends visibility, user must be authenticated
+      // Pour "friends", nécessite authentification
       if (!userId) {
-        throw new ForbiddenException('Authentication required to view friends-only activities');
+        throw new UnauthorizedException(
+          'Authentication required for friends visibility',
+        );
       }
-      // For now, return all activities (friends logic can be added later)
-      query.visibility = { $in: ['public', 'friends'] };
-    } else {
-      // Default: return only public activities
-      query.visibility = 'public';
+
+      return this.getFriendsActivities(userId);
     }
+
+    // Pour "public" ou par défaut, retourner toutes les activités publiques
+    const query: any = {
+      visibility: 'public',
+    };
 
     return this.activityModel
       .find(query)
       .populate('creator', 'name email profileImageUrl')
       .sort({ createdAt: -1 })
       .exec();
+  }
+
+  /**
+   * Récupérer les activités "friends"
+   * Retourne uniquement les activités créées par :
+   * - L'utilisateur connecté
+   * - Les utilisateurs avec qui il a matché (likes mutuels dans QuickMatch)
+   */
+  private async getFriendsActivities(userId: string): Promise<ActivityDocument[]> {
+    try {
+      // 1. Récupérer tous les matches de l'utilisateur
+      const matches = await this.matchModel
+        .find({
+          $or: [
+            { user1: new Types.ObjectId(userId) },
+            { user2: new Types.ObjectId(userId) },
+          ],
+        })
+        .exec();
+
+      // 2. Extraire les IDs des utilisateurs avec qui on a matché
+      const matchedUserIds = matches.map((match) => {
+        // Déterminer l'autre utilisateur (pas l'utilisateur connecté)
+        if (match.user1.toString() === userId) {
+          return match.user2;
+        } else {
+          return match.user1;
+        }
+      });
+
+      // 3. Ajouter l'utilisateur connecté lui-même (pour voir ses propres activités)
+      const allowedUserIds = [
+        new Types.ObjectId(userId),
+        ...matchedUserIds,
+      ];
+
+      this.logger.log(
+        `[ActivitiesService] Getting friends activities for user ${userId}. Matches found: ${matches.length}, Allowed users: ${allowedUserIds.length}`,
+      );
+
+      // 4. Récupérer les activités créées par ces utilisateurs avec visibility="friends"
+      const activities = await this.activityModel
+        .find({
+          creator: { $in: allowedUserIds },
+          visibility: 'friends',
+        })
+        .populate('creator', 'name email profileImageUrl')
+        .sort({ createdAt: -1 })
+        .exec();
+
+      this.logger.log(
+        `[ActivitiesService] Found ${activities.length} friends activities for user ${userId}`,
+      );
+
+      return activities;
+    } catch (error) {
+      this.logger.error(
+        `[ActivitiesService] Error getting friends activities: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
   }
 
   async findMyActivities(userId: string): Promise<ActivityDocument[]> {
