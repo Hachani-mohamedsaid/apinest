@@ -10,7 +10,7 @@ Ce guide explique comment implémenter l'écran QuickMatch dans une application 
 - ✅ Like un profil (swipe droite)
 - ✅ Pass un profil (swipe gauche)
 - ✅ Match automatique (si l'autre utilisateur vous a liké)
-- ✅ Exclusion des profils likés/matchés/passés récents (7 jours)
+- ✅ Exclusion permanente des profils likés/matchés/passés
 - ✅ Filtre strict par sports communs (un seul sport suffit)
 
 ---
@@ -155,7 +155,7 @@ interface QuickMatchApiService {
     
     /**
      * Récupère les profils compatibles (sports communs)
-     * Exclut automatiquement : utilisateur connecté, profils likés, matchés, et passés récents (7 jours)
+     * Exclut automatiquement : utilisateur connecté, profils likés, matchés, et passés (exclusion permanente)
      */
     @GET("quick-match/profiles")
     suspend fun getProfiles(
@@ -173,7 +173,7 @@ interface QuickMatchApiService {
     ): Response<LikeResponseDto>
     
     /**
-     * Pass un profil (ne pas afficher pendant 7 jours)
+     * Pass un profil (exclusion permanente - ne réapparaîtra plus)
      */
     @POST("quick-match/pass")
     suspend fun passProfile(
@@ -1102,7 +1102,7 @@ abstract class QuickMatchRepositoryModule {
    - Utilisateur connecté
    - Profils déjà likés
    - Profils avec matchs
-   - Profils passés récents (7 jours)
+   - Profils passés (exclusion permanente)
 
 2. **Sports Communs** : Le backend retourne uniquement les profils avec au moins un sport en commun
 

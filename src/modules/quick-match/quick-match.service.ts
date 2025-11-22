@@ -195,7 +195,6 @@ export class QuickMatchService {
         `[QuickMatch] ✅ Strategy 1 (strict): ${strictTotal} profiles found - SUFFICIENT`,
       );
       strategyUsed = 'strict';
-      finalTotal = strictTotal;
 
       const skip = (page - 1) * limit;
       const strictUsers = await this.userModel
@@ -219,17 +218,23 @@ export class QuickMatchService {
           ),
         );
       });
-    } else {
-      // STRATÉGIE 2 : Recherche flexible de sports (sans exclure passés, mais toujours exclure likés)
+
+      // ✅ CORRECTION : Mettre à jour finalTotal APRÈS le filtrage JavaScript
+      finalTotal = finalProfiles.length;
       this.logger.log(
-        `[QuickMatch] ⚠️ Strategy 1 insufficient (${strictTotal} profiles). Trying Strategy 2 (flexible sports, exclude liked/matched)...`,
+        `[QuickMatch] Strategy 1 - After JS filter: ${finalProfiles.length} profiles (from ${strictUsers.length} retrieved)`,
+      );
+    } else {
+      // STRATÉGIE 2 : Recherche flexible de sports (exclure likés/passés/matchés)
+      this.logger.log(
+        `[QuickMatch] ⚠️ Strategy 1 insufficient (${strictTotal} profiles). Trying Strategy 2 (flexible sports, exclude liked/passed/matched)...`,
       );
 
       const flexibleExcludedIds = [
         new Types.ObjectId(userId),
         ...Array.from(likedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les likés
+        ...Array.from(passedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les passés
         ...Array.from(matchedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les matchés
-        // ⚠️ NE PAS exclure les passés ici (on peut les réinclure)
       ];
 
       const flexibleQuery: any = {
@@ -256,7 +261,6 @@ export class QuickMatchService {
           `[QuickMatch] ✅ Strategy 2 (flexible sports): ${flexibleTotal} profiles found - SUFFICIENT`,
         );
         strategyUsed = 'flexible-sports';
-        finalTotal = flexibleTotal;
 
         const skip = (page - 1) * limit;
         const flexibleUsers = await this.userModel
@@ -265,24 +269,31 @@ export class QuickMatchService {
           .limit(limit)
           .exec();
 
-        // Filtrer JavaScript pour s'assurer qu'on n'inclut pas les likés
+        // Filtrer JavaScript pour s'assurer qu'on n'inclut pas les likés/passés/matchés
         finalProfiles = flexibleUsers.filter((user) => {
           const userIdStr = user._id.toString();
-          // ✅ Exclure les likés/matchés même si la query les inclut
-          if (likedUserIds.has(userIdStr) || matchedUserIds.has(userIdStr)) {
+          // ✅ Exclure les likés/passés/matchés même si la query les inclut
+          if (likedUserIds.has(userIdStr) || passedUserIds.has(userIdStr) || matchedUserIds.has(userIdStr)) {
             return false;
           }
           return true;
         });
-      } else {
-        // STRATÉGIE 3 : Sans filtre de sport (mais toujours exclure likés/matchés)
+
+        // ✅ CORRECTION : Mettre à jour finalTotal APRÈS le filtrage JavaScript
+        finalTotal = finalProfiles.length;
         this.logger.log(
-          `[QuickMatch] ⚠️ Strategy 2 insufficient (${flexibleTotal} profiles). Trying Strategy 3 (no sport filter, exclude liked/matched)...`,
+          `[QuickMatch] Strategy 2 - After JS filter: ${finalProfiles.length} profiles (from ${flexibleUsers.length} retrieved)`,
+        );
+      } else {
+        // STRATÉGIE 3 : Sans filtre de sport (mais toujours exclure likés/passés/matchés)
+        this.logger.log(
+          `[QuickMatch] ⚠️ Strategy 2 insufficient (${flexibleTotal} profiles). Trying Strategy 3 (no sport filter, exclude liked/passed/matched)...`,
         );
 
         const noSportExcludedIds = [
           new Types.ObjectId(userId),
           ...Array.from(likedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les likés
+          ...Array.from(passedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les passés
           ...Array.from(matchedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les matchés
         ];
 
@@ -297,7 +308,6 @@ export class QuickMatchService {
             `[QuickMatch] ✅ Strategy 3 (no sport filter): ${noSportTotal} profiles found - SUFFICIENT`,
           );
           strategyUsed = 'no-sport-filter';
-          finalTotal = noSportTotal;
 
           const skip = (page - 1) * limit;
           const noSportUsers = await this.userModel
@@ -306,25 +316,31 @@ export class QuickMatchService {
             .limit(limit)
             .exec();
 
-          // Filtrer JavaScript pour s'assurer qu'on n'inclut pas les likés
+          // Filtrer JavaScript pour s'assurer qu'on n'inclut pas les likés/passés/matchés
           finalProfiles = noSportUsers.filter((user) => {
             const userIdStr = user._id.toString();
-            if (likedUserIds.has(userIdStr) || matchedUserIds.has(userIdStr)) {
+            if (likedUserIds.has(userIdStr) || passedUserIds.has(userIdStr) || matchedUserIds.has(userIdStr)) {
               return false;
             }
             return true;
           });
+
+          // ✅ CORRECTION : Mettre à jour finalTotal APRÈS le filtrage JavaScript
+          finalTotal = finalProfiles.length;
+          this.logger.log(
+            `[QuickMatch] Strategy 3 - After JS filter: ${finalProfiles.length} profiles (from ${noSportUsers.length} retrieved)`,
+          );
         } else {
-          // STRATÉGIE 4 : Dernier recours - Tous sauf likés/matchés (peut inclure passés)
+          // STRATÉGIE 4 : Dernier recours - Tous sauf likés/passés/matchés
           this.logger.warn(
-            `[QuickMatch] ⚠️ Strategy 3 insufficient (${noSportTotal} profiles). Using Strategy 4 (ALL except liked/matched, may include passed)...`,
+            `[QuickMatch] ⚠️ Strategy 3 insufficient (${noSportTotal} profiles). Using Strategy 4 (ALL except liked/passed/matched)...`,
           );
 
           const finalExcludedIds = [
             new Types.ObjectId(userId),
             ...Array.from(likedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les likés
+            ...Array.from(passedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les passés
             ...Array.from(matchedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les matchés
-            // ⚠️ Peut inclure les passés si nécessaire
           ];
 
           const finalQuery: any = {
@@ -340,17 +356,17 @@ export class QuickMatchService {
             .limit(limit)
             .exec();
 
-          // Filtrer JavaScript pour garantir qu'on n'inclut JAMAIS les likés/matchés
+          // Filtrer JavaScript pour garantir qu'on n'inclut JAMAIS les likés/passés/matchés
           finalProfiles = allUsers.filter((user) => {
             const userIdStr = user._id.toString();
-            // ✅ JAMAIS retourner les likés ou matchés
-            if (likedUserIds.has(userIdStr) || matchedUserIds.has(userIdStr)) {
+            // ✅ JAMAIS retourner les likés, passés ou matchés
+            if (likedUserIds.has(userIdStr) || passedUserIds.has(userIdStr) || matchedUserIds.has(userIdStr)) {
               return false;
             }
             return true;
           });
 
-          strategyUsed = 'all-except-liked-matched';
+          strategyUsed = 'all-except-liked-passed-matched';
           finalTotal = finalProfiles.length; // Ajuster le total après filtrage
         }
       }
@@ -360,13 +376,19 @@ export class QuickMatchService {
       `[QuickMatch] User ${userId} - Final strategy: "${strategyUsed}", profiles found: ${finalProfiles.length}, total: ${finalTotal}`,
     );
 
-    // 8. FILTRAGE FINAL GARANTI - Exclure TOUJOURS les profils likés/matchés
+    // 8. FILTRAGE FINAL GARANTI - Exclure TOUJOURS les profils likés/passés/matchés
     const filteredFinalProfiles = finalProfiles.filter((user) => {
       const userIdStr = user._id.toString();
-      // ✅ GARANTIE : JAMAIS retourner les profils likés ou matchés
+      // ✅ GARANTIE : JAMAIS retourner les profils likés, passés ou matchés
       if (likedUserIds.has(userIdStr)) {
         this.logger.warn(
           `[QuickMatch] ⚠️ Filtered out liked profile: ${userIdStr} (should not have been returned)`,
+        );
+        return false;
+      }
+      if (passedUserIds.has(userIdStr)) {
+        this.logger.warn(
+          `[QuickMatch] ⚠️ Filtered out passed profile: ${userIdStr} (should not have been returned)`,
         );
         return false;
       }
@@ -380,7 +402,7 @@ export class QuickMatchService {
     });
 
     this.logger.log(
-      `[QuickMatch] User ${userId} - After final filter: ${filteredFinalProfiles.length} profiles (removed ${finalProfiles.length - filteredFinalProfiles.length} liked/matched)`,
+      `[QuickMatch] User ${userId} - After final filter: ${filteredFinalProfiles.length} profiles (removed ${finalProfiles.length - filteredFinalProfiles.length} liked/passed/matched)`,
     );
 
     // 9. Enrichir et trier les profils finaux
@@ -406,57 +428,15 @@ export class QuickMatchService {
     const totalPages = Math.ceil(actualTotal / limit);
 
     this.logger.log(
-      `[QuickMatch] ✅ User ${userId} - Strategy "${strategyUsed}": ${actualTotal} profiles returned (after filtering liked/matched)`,
+      `[QuickMatch] ✅ User ${userId} - Strategy "${strategyUsed}": ${actualTotal} profiles returned (after filtering liked/passed/matched)`,
     );
 
-    // 12. Si aucun profil après filtrage, essayer de trouver d'autres utilisateurs
+    // 12. Si aucun profil après filtrage, retourner une liste vide
+    // ✅ Les profils likés/passés/matchés ne doivent JAMAIS réapparaître
     if (actualTotal === 0) {
       this.logger.warn(
-        `[QuickMatch] ⚠️ No profiles available after filtering. All profiles were liked/matched.`,
+        `[QuickMatch] ⚠️ No profiles available after filtering. All profiles were liked/passed/matched.`,
       );
-      
-      // Dernière tentative : retourner les passés seulement (pas les likés/matchés)
-      const lastResortExcludedIds = [
-        new Types.ObjectId(userId),
-        ...Array.from(likedUserIds).map((id) => new Types.ObjectId(id)), // ✅ JAMAIS les likés
-        ...Array.from(matchedUserIds).map((id) => new Types.ObjectId(id)), // ✅ JAMAIS les matchés
-      ];
-
-      const lastResortQuery: any = {
-        _id: { $nin: lastResortExcludedIds },
-      };
-
-      const lastResortUsers = await this.userModel
-        .find(lastResortQuery)
-        .limit(limit)
-        .exec();
-
-      if (lastResortUsers.length > 0) {
-        this.logger.log(
-          `[QuickMatch] ✅ Last resort: Found ${lastResortUsers.length} passed profiles (excluding liked/matched)`,
-        );
-
-        const lastResortEnriched = await Promise.all(
-          lastResortUsers.map(async (user) => {
-            const activitiesCount = await this.activityModel.countDocuments({
-              creator: user._id,
-            }).exec();
-            const distance = this.calculateDistance(currentUser, user);
-            return {
-              ...user.toObject(),
-              activitiesCount,
-              distance: distance !== null ? `${distance.toFixed(1)} km` : null,
-            };
-          }),
-        );
-
-        return {
-          profiles: lastResortEnriched,
-          total: lastResortEnriched.length,
-          page,
-          totalPages: Math.ceil(lastResortEnriched.length / limit),
-        };
-      }
     }
 
     return {
