@@ -151,13 +151,27 @@ export class QuickMatchService {
     };
 
     if (allUserSports.length > 0) {
-      // Recherche flexible : correspondance exacte OU partielle (case-insensitive)
-      // Par exemple : "Running" match avec "Running", "running", "Running/Jogging"
-      query.$or = allUserSports.map((sport) => {
-        const normalizedSport = sport.toLowerCase().trim();
+      // Recherche dans un array : utiliser une approche plus simple et fiable
+      // Utiliser $in avec les valeurs exactes (case-insensitive) puis faire un filtrage flexible après
+      // Mais pour une recherche flexible maintenant, utiliser $or avec regex
+      
+      // Normaliser tous les sports pour la recherche (lowercase, trim)
+      const normalizedSports = allUserSports.map((sport) =>
+        sport.toLowerCase().trim(),
+      );
+      
+      // Créer des conditions $or pour chaque sport avec regex (case-insensitive)
+      // MongoDB $regex sur un array teste automatiquement chaque élément de l'array
+      query.$or = normalizedSports.map((normalizedSport) => {
+        // Escaper les caractères spéciaux pour le regex
+        const escapedSport = normalizedSport.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          '\\$&',
+        );
+        // Chercher dans l'array avec regex case-insensitive
         return {
           sportsInterests: {
-            $regex: new RegExp(normalizedSport.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'),
+            $regex: new RegExp(`^${escapedSport}$`, 'i'),
           },
         };
       });
@@ -165,13 +179,34 @@ export class QuickMatchService {
       this.logger.log(
         `[QuickMatch] Searching for users with sports matching: ${JSON.stringify(allUserSports)}`,
       );
+      this.logger.log(
+        `[QuickMatch] Normalized sports for query: ${JSON.stringify(normalizedSports)}`,
+      );
+      this.logger.log(
+        `[QuickMatch] MongoDB query: $or with ${normalizedSports.length} sports conditions`,
+      );
     }
 
     // 9. Compter le total de profils compatibles AVANT filtrage par sports communs
+    // Aussi compter TOUS les utilisateurs disponibles (sans filtre sports) pour debug
+    const totalUsersAvailable = await this.userModel.countDocuments({
+      _id: { $nin: excludedIds },
+    }).exec();
+    
+    this.logger.log(
+      `[QuickMatch] Total users available (excluding liked/matched/passed): ${totalUsersAvailable}`,
+    );
+    
     const totalBeforeFilter = await this.userModel.countDocuments(query).exec();
     this.logger.log(
       `[QuickMatch] Users found before sports filter: ${totalBeforeFilter}`,
     );
+    
+    if (totalBeforeFilter === 0 && totalUsersAvailable > 0) {
+      this.logger.warn(
+        `[QuickMatch] ⚠️ WARNING: No users found with sports filter but ${totalUsersAvailable} users available. This might indicate a problem with the sports query.`,
+      );
+    }
 
     // 10. Récupérer les profils avec pagination
     const skip = (page - 1) * limit;
