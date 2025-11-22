@@ -31,6 +31,12 @@ export class UsersController {
     return this.usersService.searchUsers(search, req.user?._id?.toString());
   }
 
+  @Get(':id/profile')
+  @UseGuards(JwtAuthGuard)
+  getUserProfileById(@Param('id') userId: string) {
+    return this.usersService.getUserProfileById(userId);
+  }
+
   @Get(':id')
   @UseGuards(JwtAuthGuard)
   findOne(@Param('id') id: string) {

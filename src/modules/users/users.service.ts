@@ -2,10 +2,11 @@ import { URLSearchParams } from 'url';
 import { BadRequestException, Injectable, InternalServerErrorException, Logger, NotFoundException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { InjectModel } from '@nestjs/mongoose';
-import { Model } from 'mongoose';
+import { Model, Types } from 'mongoose';
 import axios from 'axios';
 import { Express } from 'express';
 import { User, UserDocument } from './schemas/user.schema';
+import { Activity, ActivityDocument } from '../activities/schemas/activity.schema';
 import { UpdateProfileDto } from './dto/update-profile.dto';
 import { MailService } from '../mail/mail.service';
 import * as crypto from 'crypto';
@@ -17,6 +18,7 @@ export class UsersService {
 
   constructor(
     @InjectModel(User.name) private readonly userModel: Model<UserDocument>,
+    @InjectModel(Activity.name) private readonly activityModel: Model<ActivityDocument>,
     private readonly configService: ConfigService,
     private readonly mailService: MailService,
   ) {}
@@ -267,6 +269,79 @@ export class UsersService {
       avatar: user.profileImageUrl || user.profileImageThumbnailUrl || null, // Alias for iOS compatibility
       profileImageThumbnailUrl: user.profileImageThumbnailUrl || null,
     }));
+  }
+
+  /**
+   * Récupère le profil complet d'un utilisateur par son ID
+   * Inclut les statistiques (activités créées, activités rejointes, etc.)
+   */
+  async getUserProfileById(userId: string): Promise<any> {
+    const user = await this.userModel.findById(userId).exec();
+
+    if (!user) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Récupérer les statistiques de l'utilisateur
+    const activitiesJoined = await this.activityModel.countDocuments({
+      participantIds: new Types.ObjectId(userId),
+    }).exec();
+
+    const activitiesHosted = await this.activityModel.countDocuments({
+      creator: new Types.ObjectId(userId),
+    }).exec();
+
+    // Calculer l'âge à partir de la date de naissance
+    const calculateAge = (dateOfBirth: string | undefined): number => {
+      if (!dateOfBirth) return 0;
+      try {
+        const today = new Date();
+        const birthDate = new Date(dateOfBirth);
+        let age = today.getFullYear() - birthDate.getFullYear();
+        const monthDiff = today.getMonth() - birthDate.getMonth();
+        if (
+          monthDiff < 0 ||
+          (monthDiff === 0 && today.getDate() < birthDate.getDate())
+        ) {
+          age--;
+        }
+        return age > 0 ? age : 0;
+      } catch (error) {
+        return 0;
+      }
+    };
+
+    return {
+      id: user._id.toString(),
+      _id: user._id.toString(),
+      email: user.email,
+      name: user.name,
+      age: calculateAge(user.dateOfBirth),
+      location: user.location || 'Non spécifiée',
+      isEmailVerified: user.isEmailVerified || false,
+      phone: user.phone || null,
+      dateOfBirth: user.dateOfBirth || null,
+      about: user.about || 'Aucune description',
+      bio: user.about || 'Aucune description',
+      sportsInterests: user.sportsInterests || [],
+      profileImageUrl: user.profileImageUrl || null,
+      profileImageThumbnailUrl: user.profileImageThumbnailUrl || null,
+      profileImageDeleteUrl: user.profileImageDeleteUrl || null,
+      // Données enrichies
+      stats: {
+        sessionsJoined: activitiesJoined || 0,
+        sessionsHosted: activitiesHosted || 0,
+        followers: 0, // À implémenter si vous avez un système de followers
+        following: 0, // À implémenter si vous avez un système de following
+        favoriteSports: user.sportsInterests || [],
+      },
+      // Champs additionnels pour compatibilité
+      avatarUrl: user.profileImageUrl || user.profileImageThumbnailUrl || null,
+      coverImageUrl: user.profileImageUrl || user.profileImageThumbnailUrl || null,
+      interests: user.sportsInterests || [],
+      rating: 0, // À implémenter si vous avez un système de rating
+      activitiesJoined: activitiesJoined || 0,
+    };
   }
 }
 
