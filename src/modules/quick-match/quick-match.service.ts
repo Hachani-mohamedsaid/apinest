@@ -89,9 +89,11 @@ export class QuickMatchService {
       return { profiles: [], total: 0, page, totalPages: 0 };
     }
 
-    // 6. Récupérer les IDs des profils déjà likés ou matchés
-    // NOTE: On n'exclut PAS les profils passés pour permettre de les revoir
-    const [likedProfiles, matchedProfiles] = await Promise.all([
+    // 6. Récupérer les IDs des profils déjà likés, matchés, ou passés récemment
+    // Exclure les profils passés récents (7 derniers jours) pour éviter qu'ils réapparaissent immédiatement
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    
+    const [likedProfiles, matchedProfiles, recentPasses] = await Promise.all([
       this.likeModel
         .find({ fromUser: new Types.ObjectId(userId) })
         .select('toUser')
@@ -105,12 +107,19 @@ export class QuickMatchService {
         })
         .select('user1 user2')
         .exec(),
+      this.passModel
+        .find({
+          fromUser: new Types.ObjectId(userId),
+          createdAt: { $gte: sevenDaysAgo }, // Seulement les passes récents (7 derniers jours)
+        })
+        .select('toUser')
+        .exec(),
     ]);
 
     const excludedUserIds = new Set<string>();
-    // Exclure seulement les profils déjà likés
+    // Exclure les profils déjà likés (toujours exclus)
     likedProfiles.forEach((like) => excludedUserIds.add(like.toUser.toString()));
-    // Exclure les profils avec lesquels on a déjà matché
+    // Exclure les profils avec lesquels on a déjà matché (toujours exclus)
     matchedProfiles.forEach((match) => {
       excludedUserIds.add(
         match.user1.toString() === userId
@@ -118,11 +127,12 @@ export class QuickMatchService {
           : match.user1.toString(),
       );
     });
-    // NOTE: On n'exclut PAS les profils passés pour permettre de les revoir
-    // Cela permet d'avoir plus de profils disponibles et de ne pas bloquer l'utilisateur
+    // Exclure les profils passés récemment (moins de 7 jours) pour éviter qu'ils réapparaissent immédiatement
+    // Les profils passés il y a plus de 7 jours peuvent réapparaître
+    recentPasses.forEach((pass) => excludedUserIds.add(pass.toUser.toString()));
 
     this.logger.log(
-      `[QuickMatch] Excluded profiles - Liked: ${likedProfiles.length}, Matched: ${matchedProfiles.length}, Total excluded: ${excludedUserIds.size}`,
+      `[QuickMatch] Excluded profiles - Liked: ${likedProfiles.length}, Matched: ${matchedProfiles.length}, Recent Passes: ${recentPasses.length}, Total excluded: ${excludedUserIds.size}`,
     );
 
     // Construire la liste des IDs à exclure
@@ -214,57 +224,92 @@ export class QuickMatchService {
     );
 
     // Si moins de 5 profils avec sports communs, assouplir le filtre
-    // Mais toujours prioriser les profils avec sports communs
+    // Mais TOUJOURS exclure les profils likés/matchés même dans le filtre assoupli
     if (compatibleProfiles.length < 5) {
       this.logger.log(
         `[QuickMatch] Found ${compatibleProfiles.length} profiles with common sports (target: 5+)`,
       );
 
-      // Essayer d'abord avec un filtre encore plus assoupli pour les sports similaires
-      // Inclure les utilisateurs qui ont des sports "proches" même si pas exactement identiques
-      const relaxedQuery: any = {
-        _id: { $nin: excludedIds },
-        sportsInterests: { $exists: true, $ne: [], $not: { $size: 0 } }, // Au moins un sport
-      };
-
-      // Si on n'a toujours pas assez, inclure TOUS les utilisateurs (sauf exclus)
+      // IMPORTANT: excludedIds contient déjà userId + profils likés + profils matchés
+      // On ne doit JAMAIS inclure ces profils, même dans le filtre assoupli
+      
+      // Si on n'a toujours pas assez, inclure d'autres utilisateurs (sauf exclus)
       if (compatibleProfiles.length < 3) {
         this.logger.log(
-          `[QuickMatch] Too few compatible profiles (${compatibleProfiles.length}), using all available users...`,
+          `[QuickMatch] Too few compatible profiles (${compatibleProfiles.length}), searching for additional profiles...`,
         );
 
-        const allAvailableUsers = await this.userModel
-          .find({
-            _id: { $nin: excludedIds },
-          })
+        // Chercher d'autres utilisateurs (sans filtre par sports) mais EXCLURE les likés/matchés
+        const additionalQuery: any = {
+          _id: { $nin: excludedIds }, // Exclut TOUJOURS userId, likés, et matchés
+          sportsInterests: { $exists: true, $ne: [], $not: { $size: 0 } }, // Au moins un sport
+        };
+
+        const additionalUsers = await this.userModel
+          .find(additionalQuery)
           .skip(skip)
-          .limit(limit)
+          .limit(Math.max(limit - compatibleProfiles.length, 0))
           .exec();
 
         this.logger.log(
-          `[QuickMatch] All available users (excluding liked/matched): ${allAvailableUsers.length}`,
+          `[QuickMatch] Additional users found (excluding liked/matched): ${additionalUsers.length}`,
         );
 
-        // Combiner : profils avec sports communs + autres profils disponibles
-        const additionalUsers = allAvailableUsers.filter(
+        // Vérifier que les profils additionnels ne sont pas déjà dans compatibleProfiles
+        const uniqueAdditionalUsers = additionalUsers.filter(
           (user) => !compatibleProfiles.some((cp) => cp._id.toString() === user._id.toString()),
         );
 
-        // Prioriser les profils avec sports communs, puis ajouter les autres
-        compatibleProfiles = [...compatibleProfiles, ...additionalUsers].slice(0, limit);
+        // Double vérification : s'assurer qu'aucun profil liké/matché n'est inclus
+        const finalAdditionalUsers = uniqueAdditionalUsers.filter((user) => {
+          const userIdStr = user._id.toString();
+          return !excludedUserIds.has(userIdStr) && userIdStr !== userId;
+        });
 
         this.logger.log(
-          `[QuickMatch] Combined profiles: ${compatibleProfiles.length} (${compatibleProfiles.length - additionalUsers.length} with common sports + ${additionalUsers.length} additional)`,
+          `[QuickMatch] Final additional users (after duplicate/exclusion check): ${finalAdditionalUsers.length}`,
         );
+
+        // Combiner : profils avec sports communs (priorité) + autres profils
+        compatibleProfiles = [...compatibleProfiles, ...finalAdditionalUsers].slice(0, limit);
+
+        this.logger.log(
+          `[QuickMatch] Combined profiles: ${compatibleProfiles.length} (${compatibleProfiles.length - finalAdditionalUsers.length} with common sports + ${finalAdditionalUsers.length} additional)`,
+        );
+        
+        // Vérification finale : s'assurer qu'aucun profil exclu n'est présent
+        const hasExcludedProfiles = compatibleProfiles.some((profile) => {
+          const profileIdStr = profile._id.toString();
+          return excludedUserIds.has(profileIdStr) || profileIdStr === userId;
+        });
+
+        if (hasExcludedProfiles) {
+          this.logger.error(
+            `[QuickMatch] ⚠️ WARNING: Found excluded profiles in results! Filtering them out...`,
+          );
+          compatibleProfiles = compatibleProfiles.filter((profile) => {
+            const profileIdStr = profile._id.toString();
+            return !excludedUserIds.has(profileIdStr) && profileIdStr !== userId;
+          });
+          this.logger.log(
+            `[QuickMatch] After filtering excluded profiles: ${compatibleProfiles.length} profiles`,
+          );
+        }
       }
     }
 
-    // 12. Compter le total final
-    const total = compatibleProfiles.length < 3 && totalBeforeFilter < 3
-      ? await this.userModel.countDocuments({
-          _id: { $nin: excludedIds },
-        }).exec()
-      : totalBeforeFilter;
+    // 12. Compter le total final (en excluant toujours les profils likés/matchés)
+    let total = totalBeforeFilter;
+    if (compatibleProfiles.length < 3) {
+      // Si on a utilisé le filtre assoupli, compter tous les utilisateurs disponibles (sauf exclus)
+      total = await this.userModel.countDocuments({
+        _id: { $nin: excludedIds },
+        sportsInterests: { $exists: true, $ne: [], $not: { $size: 0 } },
+      }).exec();
+      this.logger.log(
+        `[QuickMatch] Total count with relaxed filter: ${total}`,
+      );
+    }
 
     // 12. Enrichir avec les données des activités et distance
     const enrichedProfiles = await Promise.all(
