@@ -129,39 +129,16 @@ export class QuickMatchService {
       };
     }
 
-    // 6. D'abord, compter les profils compatibles SANS exclure les likés/passés
-    const queryWithoutExclusions: any = {
-      _id: { $ne: new Types.ObjectId(userId) },
-    };
-
-    // Filtrer par sports communs (au moins un sport en commun)
-    if (allUserSports.length > 0) {
-      queryWithoutExclusions.sportsInterests = {
-        $in: allUserSports.map((sport) => new RegExp(`^${sport}$`, 'i')),
-      };
-    }
-
-    const totalWithoutExclusions = await this.userModel
-      .countDocuments(queryWithoutExclusions)
-      .exec();
-
-    this.logger.log(
-      `[QuickMatch] User ${userId} - Compatible profiles (before exclusions): ${totalWithoutExclusions}`,
-    );
-
-    // 7. Récupérer les IDs des profils à exclure
+    // 6. Récupérer les IDs des profils à exclure
     const [likedProfiles, passedProfiles, matchedProfiles] = await Promise.all([
-      // Profils déjà likés
       this.likeModel
         .find({ fromUser: new Types.ObjectId(userId) })
         .select('toUser')
         .exec(),
-      // Profils déjà passés
       this.passModel
         .find({ fromUser: new Types.ObjectId(userId) })
         .select('toUser')
         .exec(),
-      // Profils déjà matchés
       this.matchModel
         .find({
           $or: [
@@ -173,165 +150,246 @@ export class QuickMatchService {
         .exec(),
     ]);
 
-    // 8. Construire la liste des IDs à exclure
-    const excludedUserIds = new Set<string>();
-    
-    // Ajouter les profils likés
-    likedProfiles.forEach((like) => excludedUserIds.add(like.toUser.toString()));
-    
-    // Ajouter les profils passés
-    passedProfiles.forEach((pass) => excludedUserIds.add(pass.toUser.toString()));
-    
-    // Ajouter les profils matchés (toujours exclus)
-    matchedProfiles.forEach((match) => {
-      excludedUserIds.add(
+    const likedUserIds = new Set(likedProfiles.map((like) => like.toUser.toString()));
+    const passedUserIds = new Set(passedProfiles.map((pass) => pass.toUser.toString()));
+    const matchedUserIds = new Set(
+      matchedProfiles.map((match) =>
         match.user1.toString() === userId
           ? match.user2.toString()
           : match.user1.toString(),
-      );
-    });
-
-    this.logger.log(
-      `[QuickMatch] User ${userId} - Excluded (liked/passed/matched): ${excludedUserIds.size}`,
+      ),
     );
 
-    // 9. Si moins de 3 profils disponibles, NE PAS exclure les likés/passés (sauf matchés)
-    if (totalWithoutExclusions < 3) {
-      this.logger.warn(
-        `[QuickMatch] ⚠️ Only ${totalWithoutExclusions} compatible profiles found. Including liked/passed profiles (except matched).`,
-      );
+    this.logger.log(
+      `[QuickMatch] User ${userId} - Excluded: liked=${likedUserIds.size}, passed=${passedUserIds.size}, matched=${matchedUserIds.size}`,
+    );
 
-      // Exclure seulement l'utilisateur connecté et les matchés
-      const minimalExcludedIds = [
-        new Types.ObjectId(userId),
-        ...matchedProfiles.map((match) =>
-          match.user1.toString() === userId
-            ? match.user2
-            : match.user1,
-        ),
-      ];
+    // 7. FILTRAGE PROGRESSIF INTELLIGENT - Garantir 100% de résultats sans retourner les likés
+    let finalProfiles: any[] = [];
+    let finalTotal = 0;
+    let strategyUsed = '';
 
-      const relaxedQuery: any = {
-        _id: { $nin: minimalExcludedIds },
+    // STRATÉGIE 1 : Filtrage strict (sports communs exacts + exclure likés/passés/matchés)
+    const strictExcludedIds = [
+      new Types.ObjectId(userId),
+      ...Array.from(likedUserIds).map((id) => new Types.ObjectId(id)),
+      ...Array.from(passedUserIds).map((id) => new Types.ObjectId(id)),
+      ...Array.from(matchedUserIds).map((id) => new Types.ObjectId(id)),
+    ];
+
+    const strictQuery: any = {
+      _id: { $nin: strictExcludedIds },
+    };
+
+    if (allUserSports.length > 0) {
+      strictQuery.sportsInterests = {
+        $in: allUserSports.map((sport) => new RegExp(`^${sport}$`, 'i')),
       };
+    }
 
-      if (allUserSports.length > 0) {
-        relaxedQuery.sportsInterests = {
-          $in: allUserSports.map((sport) => new RegExp(`^${sport}$`, 'i')),
-        };
-      }
+    const strictTotal = await this.userModel.countDocuments(strictQuery).exec();
 
-      const relaxedTotal = await this.userModel
-        .countDocuments(relaxedQuery)
-        .exec();
+    if (strictTotal >= 3) {
+      // Assez de profils avec filtrage strict
+      this.logger.log(
+        `[QuickMatch] ✅ Strategy 1 (strict): ${strictTotal} profiles found - SUFFICIENT`,
+      );
+      strategyUsed = 'strict';
+      finalTotal = strictTotal;
 
       const skip = (page - 1) * limit;
-      const relaxedUsers = await this.userModel
-        .find(relaxedQuery)
+      const strictUsers = await this.userModel
+        .find(strictQuery)
         .skip(skip)
         .limit(limit)
         .exec();
 
-      // Double vérification - Filtrer par sports communs
-      const compatibleProfiles = relaxedUsers.filter((user) => {
+      finalProfiles = strictUsers.filter((user) => {
+        const userIdStr = user._id.toString();
+        // ✅ GARANTIE : Exclure les likés/matchés même si la query les inclut
+        if (likedUserIds.has(userIdStr) || matchedUserIds.has(userIdStr)) {
+          return false;
+        }
+        // Vérifier les sports communs
         const userSports = user.sportsInterests || [];
-        const hasCommonSport = allUserSports.some((sport) =>
+        return allUserSports.some((sport) =>
           userSports.some(
             (userSport) =>
               userSport.toLowerCase().trim() === sport.toLowerCase().trim(),
           ),
         );
-        return hasCommonSport;
       });
-
-      // Enrichir avec les données supplémentaires
-      const enrichedProfiles = await Promise.all(
-        compatibleProfiles.map(async (user) => {
-          const activitiesCount = await this.activityModel.countDocuments({
-            creator: user._id,
-          }).exec();
-          const distance = this.calculateDistance(currentUser, user);
-          return {
-            ...user.toObject(),
-            activitiesCount,
-            distance: distance !== null ? `${distance.toFixed(1)} km` : null,
-          };
-        }),
-      );
-
-      const sortedProfiles = this.sortByRelevance(enrichedProfiles, allUserSports);
-      const totalPages = Math.ceil(relaxedTotal / limit);
-
+    } else {
+      // STRATÉGIE 2 : Recherche flexible de sports (sans exclure passés, mais toujours exclure likés)
       this.logger.log(
-        `[QuickMatch] User ${userId} - Final profiles returned (relaxed): ${sortedProfiles.length}`,
+        `[QuickMatch] ⚠️ Strategy 1 insufficient (${strictTotal} profiles). Trying Strategy 2 (flexible sports, exclude liked/matched)...`,
       );
 
-      return {
-        profiles: sortedProfiles,
-        total: relaxedTotal,
-        page,
-        totalPages,
+      const flexibleExcludedIds = [
+        new Types.ObjectId(userId),
+        ...Array.from(likedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les likés
+        ...Array.from(matchedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les matchés
+        // ⚠️ NE PAS exclure les passés ici (on peut les réinclure)
+      ];
+
+      const flexibleQuery: any = {
+        _id: { $nin: flexibleExcludedIds },
       };
+
+      // Recherche flexible : sports partiels ou similaires
+      if (allUserSports.length > 0) {
+        flexibleQuery.$or = allUserSports.map((sport) => ({
+          sportsInterests: {
+            $in: [
+              new RegExp(sport, 'i'), // Recherche partielle
+              new RegExp(`^${sport}`, 'i'), // Commence par
+              new RegExp(`${sport}$`, 'i'), // Termine par
+            ],
+          },
+        }));
+      }
+
+      const flexibleTotal = await this.userModel.countDocuments(flexibleQuery).exec();
+
+      if (flexibleTotal >= 3) {
+        this.logger.log(
+          `[QuickMatch] ✅ Strategy 2 (flexible sports): ${flexibleTotal} profiles found - SUFFICIENT`,
+        );
+        strategyUsed = 'flexible-sports';
+        finalTotal = flexibleTotal;
+
+        const skip = (page - 1) * limit;
+        const flexibleUsers = await this.userModel
+          .find(flexibleQuery)
+          .skip(skip)
+          .limit(limit)
+          .exec();
+
+        // Filtrer JavaScript pour s'assurer qu'on n'inclut pas les likés
+        finalProfiles = flexibleUsers.filter((user) => {
+          const userIdStr = user._id.toString();
+          // ✅ Exclure les likés/matchés même si la query les inclut
+          if (likedUserIds.has(userIdStr) || matchedUserIds.has(userIdStr)) {
+            return false;
+          }
+          return true;
+        });
+      } else {
+        // STRATÉGIE 3 : Sans filtre de sport (mais toujours exclure likés/matchés)
+        this.logger.log(
+          `[QuickMatch] ⚠️ Strategy 2 insufficient (${flexibleTotal} profiles). Trying Strategy 3 (no sport filter, exclude liked/matched)...`,
+        );
+
+        const noSportExcludedIds = [
+          new Types.ObjectId(userId),
+          ...Array.from(likedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les likés
+          ...Array.from(matchedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les matchés
+        ];
+
+        const noSportQuery: any = {
+          _id: { $nin: noSportExcludedIds },
+        };
+
+        const noSportTotal = await this.userModel.countDocuments(noSportQuery).exec();
+
+        if (noSportTotal >= 3) {
+          this.logger.log(
+            `[QuickMatch] ✅ Strategy 3 (no sport filter): ${noSportTotal} profiles found - SUFFICIENT`,
+          );
+          strategyUsed = 'no-sport-filter';
+          finalTotal = noSportTotal;
+
+          const skip = (page - 1) * limit;
+          const noSportUsers = await this.userModel
+            .find(noSportQuery)
+            .skip(skip)
+            .limit(limit)
+            .exec();
+
+          // Filtrer JavaScript pour s'assurer qu'on n'inclut pas les likés
+          finalProfiles = noSportUsers.filter((user) => {
+            const userIdStr = user._id.toString();
+            if (likedUserIds.has(userIdStr) || matchedUserIds.has(userIdStr)) {
+              return false;
+            }
+            return true;
+          });
+        } else {
+          // STRATÉGIE 4 : Dernier recours - Tous sauf likés/matchés (peut inclure passés)
+          this.logger.warn(
+            `[QuickMatch] ⚠️ Strategy 3 insufficient (${noSportTotal} profiles). Using Strategy 4 (ALL except liked/matched, may include passed)...`,
+          );
+
+          const finalExcludedIds = [
+            new Types.ObjectId(userId),
+            ...Array.from(likedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les likés
+            ...Array.from(matchedUserIds).map((id) => new Types.ObjectId(id)), // ✅ TOUJOURS exclure les matchés
+            // ⚠️ Peut inclure les passés si nécessaire
+          ];
+
+          const finalQuery: any = {
+            _id: { $nin: finalExcludedIds },
+          };
+
+          finalTotal = await this.userModel.countDocuments(finalQuery).exec();
+
+          const skip = (page - 1) * limit;
+          const allUsers = await this.userModel
+            .find(finalQuery)
+            .skip(skip)
+            .limit(limit)
+            .exec();
+
+          // Filtrer JavaScript pour garantir qu'on n'inclut JAMAIS les likés/matchés
+          finalProfiles = allUsers.filter((user) => {
+            const userIdStr = user._id.toString();
+            // ✅ JAMAIS retourner les likés ou matchés
+            if (likedUserIds.has(userIdStr) || matchedUserIds.has(userIdStr)) {
+              return false;
+            }
+            return true;
+          });
+
+          strategyUsed = 'all-except-liked-matched';
+          finalTotal = finalProfiles.length; // Ajuster le total après filtrage
+        }
+      }
     }
-
-    // 10. Si >= 3 profils, exclure les likés/passés (comportement normal)
-    const excludedIds = [
-      new Types.ObjectId(userId),
-      ...Array.from(excludedUserIds).map((id) => new Types.ObjectId(id)),
-    ];
-
-    const query: any = {
-      _id: { $nin: excludedIds },
-    };
-
-    if (allUserSports.length > 0) {
-      query.sportsInterests = {
-        $in: allUserSports.map((sport) => new RegExp(`^${sport}$`, 'i')),
-      };
-    }
-
-    // 11. Compter le total de profils compatibles
-    const total = await this.userModel.countDocuments(query).exec();
 
     this.logger.log(
-      `[QuickMatch] User ${userId} - Compatible profiles (after exclusions): ${total}`,
+      `[QuickMatch] User ${userId} - Final strategy: "${strategyUsed}", profiles found: ${finalProfiles.length}, total: ${finalTotal}`,
     );
 
-    // 12. Récupérer les profils avec pagination
-    const skip = (page - 1) * limit;
-    const allUsers = await this.userModel
-      .find(query)
-      .skip(skip)
-      .limit(limit)
-      .exec();
-
-    // 13. Double vérification - Filtrer par sports communs
-    // Cette étape est importante car MongoDB regex peut ne pas être 100% précis
-    const compatibleProfiles = allUsers.filter((user) => {
-      const userSports = user.sportsInterests || [];
-      
-      // Vérifier s'il y a au moins un sport en commun (case-insensitive)
-      const hasCommonSport = allUserSports.some((sport) =>
-        userSports.some(
-          (userSport) =>
-            userSport.toLowerCase().trim() === sport.toLowerCase().trim(),
-        ),
-      );
-
-      return hasCommonSport;
+    // 8. FILTRAGE FINAL GARANTI - Exclure TOUJOURS les profils likés/matchés
+    const filteredFinalProfiles = finalProfiles.filter((user) => {
+      const userIdStr = user._id.toString();
+      // ✅ GARANTIE : JAMAIS retourner les profils likés ou matchés
+      if (likedUserIds.has(userIdStr)) {
+        this.logger.warn(
+          `[QuickMatch] ⚠️ Filtered out liked profile: ${userIdStr} (should not have been returned)`,
+        );
+        return false;
+      }
+      if (matchedUserIds.has(userIdStr)) {
+        this.logger.warn(
+          `[QuickMatch] ⚠️ Filtered out matched profile: ${userIdStr} (should not have been returned)`,
+        );
+        return false;
+      }
+      return true;
     });
 
-    // 14. Enrichir avec les données supplémentaires
+    this.logger.log(
+      `[QuickMatch] User ${userId} - After final filter: ${filteredFinalProfiles.length} profiles (removed ${finalProfiles.length - filteredFinalProfiles.length} liked/matched)`,
+    );
+
+    // 9. Enrichir et trier les profils finaux
     const enrichedProfiles = await Promise.all(
-      compatibleProfiles.map(async (user) => {
-        // Compter les activités créées par cet utilisateur
+      filteredFinalProfiles.map(async (user) => {
         const activitiesCount = await this.activityModel.countDocuments({
           creator: user._id,
         }).exec();
-
-        // Calculer la distance (si on a les coordonnées GPS)
         const distance = this.calculateDistance(currentUser, user);
-
         return {
           ...user.toObject(),
           activitiesCount,
@@ -340,28 +398,72 @@ export class QuickMatchService {
       }),
     );
 
-    // 15. Trier par pertinence
+    // 10. Trier par pertinence (prioriser les sports communs)
     const sortedProfiles = this.sortByRelevance(enrichedProfiles, allUserSports);
 
-    // 16. Calculer la pagination
-    const totalPages = Math.ceil(total / limit);
+    // 11. Calculer la pagination (basée sur le nombre réel de profils retournés)
+    const actualTotal = sortedProfiles.length;
+    const totalPages = Math.ceil(actualTotal / limit);
 
     this.logger.log(
-      `[QuickMatch] User ${userId} - Final profiles returned: ${sortedProfiles.length}`,
+      `[QuickMatch] ✅ User ${userId} - Strategy "${strategyUsed}": ${actualTotal} profiles returned (after filtering liked/matched)`,
     );
 
-    // 17. S'assurer qu'on retourne au moins quelque chose (fallback si aucun profil)
-    if (sortedProfiles.length === 0 && total === 0) {
+    // 12. Si aucun profil après filtrage, essayer de trouver d'autres utilisateurs
+    if (actualTotal === 0) {
       this.logger.warn(
-        `[QuickMatch] ⚠️ No profiles found for user ${userId}. Returning empty list.`,
+        `[QuickMatch] ⚠️ No profiles available after filtering. All profiles were liked/matched.`,
       );
+      
+      // Dernière tentative : retourner les passés seulement (pas les likés/matchés)
+      const lastResortExcludedIds = [
+        new Types.ObjectId(userId),
+        ...Array.from(likedUserIds).map((id) => new Types.ObjectId(id)), // ✅ JAMAIS les likés
+        ...Array.from(matchedUserIds).map((id) => new Types.ObjectId(id)), // ✅ JAMAIS les matchés
+      ];
+
+      const lastResortQuery: any = {
+        _id: { $nin: lastResortExcludedIds },
+      };
+
+      const lastResortUsers = await this.userModel
+        .find(lastResortQuery)
+        .limit(limit)
+        .exec();
+
+      if (lastResortUsers.length > 0) {
+        this.logger.log(
+          `[QuickMatch] ✅ Last resort: Found ${lastResortUsers.length} passed profiles (excluding liked/matched)`,
+        );
+
+        const lastResortEnriched = await Promise.all(
+          lastResortUsers.map(async (user) => {
+            const activitiesCount = await this.activityModel.countDocuments({
+              creator: user._id,
+            }).exec();
+            const distance = this.calculateDistance(currentUser, user);
+            return {
+              ...user.toObject(),
+              activitiesCount,
+              distance: distance !== null ? `${distance.toFixed(1)} km` : null,
+            };
+          }),
+        );
+
+        return {
+          profiles: lastResortEnriched,
+          total: lastResortEnriched.length,
+          page,
+          totalPages: Math.ceil(lastResortEnriched.length / limit),
+        };
+      }
     }
 
     return {
       profiles: sortedProfiles,
-      total: Math.max(total, sortedProfiles.length), // S'assurer que total >= nombre de profils retournés
+      total: actualTotal, // Utiliser le nombre réel de profils retournés
       page,
-      totalPages,
+      totalPages: Math.max(1, totalPages), // Au moins 1 page
     };
   }
 
