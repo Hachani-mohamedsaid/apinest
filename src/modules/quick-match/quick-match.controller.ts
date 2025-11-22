@@ -57,7 +57,7 @@ export class QuickMatchController {
   ) {
     const userId = req.user._id.toString();
     const pageNum = page ? parseInt(page, 10) : 1;
-    const limitNum = limit ? parseInt(limit, 10) : 20;
+    const limitNum = limit ? parseInt(limit, 10) : 100; // ✅ Augmenter de 20 à 100 par défaut
     
     const result = await this.quickMatchService.getCompatibleProfiles(
       userId,

@@ -81,15 +81,75 @@ export class QuickMatchService {
       `[QuickMatch] User ${userId} allUserSports: ${JSON.stringify(allUserSports)}`,
     );
 
-    // Si l'utilisateur n'a aucun sport, retourner une liste vide
+    // Si l'utilisateur n'a aucun sport, retourner tous les utilisateurs (fallback)
     if (allUserSports.length === 0) {
       this.logger.warn(
-        `[QuickMatch] User ${userId} has no sports interests or activities`,
+        `[QuickMatch] User ${userId} has no sports interests or activities. Returning all users as fallback.`,
       );
-      return { profiles: [], total: 0, page, totalPages: 0 };
+      
+      // Construire une requête sans filtre de sport (fallback)
+      const fallbackQuery: any = {
+        _id: { $ne: new Types.ObjectId(userId) },
+      };
+
+      const fallbackTotal = await this.userModel.countDocuments(fallbackQuery).exec();
+      const skip = (page - 1) * limit;
+      const fallbackUsers = await this.userModel
+        .find(fallbackQuery)
+        .skip(skip)
+        .limit(limit)
+        .exec();
+
+      // Enrichir avec les données supplémentaires
+      const enrichedFallbackProfiles = await Promise.all(
+        fallbackUsers.map(async (user) => {
+          const activitiesCount = await this.activityModel.countDocuments({
+            creator: user._id,
+          }).exec();
+          const distance = this.calculateDistance(currentUser, user);
+          return {
+            ...user.toObject(),
+            activitiesCount,
+            distance: distance !== null ? `${distance.toFixed(1)} km` : null,
+          };
+        }),
+      );
+
+      const totalPages = Math.ceil(fallbackTotal / limit);
+      
+      this.logger.log(
+        `[QuickMatch] User ${userId} - Fallback profiles returned: ${enrichedFallbackProfiles.length}`,
+      );
+
+      return {
+        profiles: enrichedFallbackProfiles,
+        total: fallbackTotal,
+        page,
+        totalPages,
+      };
     }
 
-    // 6. Récupérer les IDs des profils à exclure
+    // 6. D'abord, compter les profils compatibles SANS exclure les likés/passés
+    const queryWithoutExclusions: any = {
+      _id: { $ne: new Types.ObjectId(userId) },
+    };
+
+    // Filtrer par sports communs (au moins un sport en commun)
+    if (allUserSports.length > 0) {
+      queryWithoutExclusions.sportsInterests = {
+        $in: allUserSports.map((sport) => new RegExp(`^${sport}$`, 'i')),
+      };
+    }
+
+    const totalWithoutExclusions = await this.userModel
+      .countDocuments(queryWithoutExclusions)
+      .exec();
+
+    this.logger.log(
+      `[QuickMatch] User ${userId} - Compatible profiles (before exclusions): ${totalWithoutExclusions}`,
+    );
+
+    // 7. Récupérer les IDs des profils à exclure
     const [likedProfiles, passedProfiles, matchedProfiles] = await Promise.all([
       // Profils déjà likés
       this.likeModel
@@ -113,7 +173,7 @@ export class QuickMatchService {
         .exec(),
     ]);
 
-    // 7. Construire la liste des IDs à exclure
+    // 8. Construire la liste des IDs à exclure
     const excludedUserIds = new Set<string>();
     
     // Ajouter les profils likés
@@ -122,7 +182,7 @@ export class QuickMatchService {
     // Ajouter les profils passés
     passedProfiles.forEach((pass) => excludedUserIds.add(pass.toUser.toString()));
     
-    // Ajouter les profils matchés
+    // Ajouter les profils matchés (toujours exclus)
     matchedProfiles.forEach((match) => {
       excludedUserIds.add(
         match.user1.toString() === userId
@@ -131,29 +191,113 @@ export class QuickMatchService {
       );
     });
 
-    // Construire le tableau d'IDs à exclure (incluant l'utilisateur connecté)
+    this.logger.log(
+      `[QuickMatch] User ${userId} - Excluded (liked/passed/matched): ${excludedUserIds.size}`,
+    );
+
+    // 9. Si moins de 3 profils disponibles, NE PAS exclure les likés/passés (sauf matchés)
+    if (totalWithoutExclusions < 3) {
+      this.logger.warn(
+        `[QuickMatch] ⚠️ Only ${totalWithoutExclusions} compatible profiles found. Including liked/passed profiles (except matched).`,
+      );
+
+      // Exclure seulement l'utilisateur connecté et les matchés
+      const minimalExcludedIds = [
+        new Types.ObjectId(userId),
+        ...matchedProfiles.map((match) =>
+          match.user1.toString() === userId
+            ? match.user2
+            : match.user1,
+        ),
+      ];
+
+      const relaxedQuery: any = {
+        _id: { $nin: minimalExcludedIds },
+      };
+
+      if (allUserSports.length > 0) {
+        relaxedQuery.sportsInterests = {
+          $in: allUserSports.map((sport) => new RegExp(`^${sport}$`, 'i')),
+        };
+      }
+
+      const relaxedTotal = await this.userModel
+        .countDocuments(relaxedQuery)
+        .exec();
+
+      const skip = (page - 1) * limit;
+      const relaxedUsers = await this.userModel
+        .find(relaxedQuery)
+        .skip(skip)
+        .limit(limit)
+        .exec();
+
+      // Double vérification - Filtrer par sports communs
+      const compatibleProfiles = relaxedUsers.filter((user) => {
+        const userSports = user.sportsInterests || [];
+        const hasCommonSport = allUserSports.some((sport) =>
+          userSports.some(
+            (userSport) =>
+              userSport.toLowerCase().trim() === sport.toLowerCase().trim(),
+          ),
+        );
+        return hasCommonSport;
+      });
+
+      // Enrichir avec les données supplémentaires
+      const enrichedProfiles = await Promise.all(
+        compatibleProfiles.map(async (user) => {
+          const activitiesCount = await this.activityModel.countDocuments({
+            creator: user._id,
+          }).exec();
+          const distance = this.calculateDistance(currentUser, user);
+          return {
+            ...user.toObject(),
+            activitiesCount,
+            distance: distance !== null ? `${distance.toFixed(1)} km` : null,
+          };
+        }),
+      );
+
+      const sortedProfiles = this.sortByRelevance(enrichedProfiles, allUserSports);
+      const totalPages = Math.ceil(relaxedTotal / limit);
+
+      this.logger.log(
+        `[QuickMatch] User ${userId} - Final profiles returned (relaxed): ${sortedProfiles.length}`,
+      );
+
+      return {
+        profiles: sortedProfiles,
+        total: relaxedTotal,
+        page,
+        totalPages,
+      };
+    }
+
+    // 10. Si >= 3 profils, exclure les likés/passés (comportement normal)
     const excludedIds = [
-      new Types.ObjectId(userId), // Exclure l'utilisateur connecté
+      new Types.ObjectId(userId),
       ...Array.from(excludedUserIds).map((id) => new Types.ObjectId(id)),
     ];
 
-    // 8. Construire la requête MongoDB
     const query: any = {
-      _id: { $nin: excludedIds }, // Exclure les IDs listés
+      _id: { $nin: excludedIds },
     };
 
-    // Filtrer par sports communs (au moins un sport en commun)
-    // Utiliser $in avec regex pour la recherche case-insensitive
     if (allUserSports.length > 0) {
       query.sportsInterests = {
         $in: allUserSports.map((sport) => new RegExp(`^${sport}$`, 'i')),
       };
     }
 
-    // 9. Compter le total de profils compatibles
+    // 11. Compter le total de profils compatibles
     const total = await this.userModel.countDocuments(query).exec();
 
-    // 10. Récupérer les profils avec pagination
+    this.logger.log(
+      `[QuickMatch] User ${userId} - Compatible profiles (after exclusions): ${total}`,
+    );
+
+    // 12. Récupérer les profils avec pagination
     const skip = (page - 1) * limit;
     const allUsers = await this.userModel
       .find(query)
@@ -161,7 +305,7 @@ export class QuickMatchService {
       .limit(limit)
       .exec();
 
-    // 11. Double vérification - Filtrer par sports communs
+    // 13. Double vérification - Filtrer par sports communs
     // Cette étape est importante car MongoDB regex peut ne pas être 100% précis
     const compatibleProfiles = allUsers.filter((user) => {
       const userSports = user.sportsInterests || [];
@@ -177,7 +321,7 @@ export class QuickMatchService {
       return hasCommonSport;
     });
 
-    // 12. Enrichir avec les données supplémentaires
+    // 14. Enrichir avec les données supplémentaires
     const enrichedProfiles = await Promise.all(
       compatibleProfiles.map(async (user) => {
         // Compter les activités créées par cet utilisateur
@@ -196,15 +340,26 @@ export class QuickMatchService {
       }),
     );
 
-    // 13. Trier par pertinence
+    // 15. Trier par pertinence
     const sortedProfiles = this.sortByRelevance(enrichedProfiles, allUserSports);
 
-    // 14. Calculer la pagination
+    // 16. Calculer la pagination
     const totalPages = Math.ceil(total / limit);
+
+    this.logger.log(
+      `[QuickMatch] User ${userId} - Final profiles returned: ${sortedProfiles.length}`,
+    );
+
+    // 17. S'assurer qu'on retourne au moins quelque chose (fallback si aucun profil)
+    if (sortedProfiles.length === 0 && total === 0) {
+      this.logger.warn(
+        `[QuickMatch] ⚠️ No profiles found for user ${userId}. Returning empty list.`,
+      );
+    }
 
     return {
       profiles: sortedProfiles,
-      total,
+      total: Math.max(total, sortedProfiles.length), // S'assurer que total >= nombre de profils retournés
       page,
       totalPages,
     };
