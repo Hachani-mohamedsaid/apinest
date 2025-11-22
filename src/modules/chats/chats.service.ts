@@ -3,6 +3,9 @@ import {
   NotFoundException,
   ForbiddenException,
   BadRequestException,
+  Inject,
+  forwardRef,
+  Logger,
 } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
@@ -11,13 +14,18 @@ import { Message, MessageDocument } from './schemas/message.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { CreateChatDto } from './dto/create-chat.dto';
 import { SendMessageDto } from './dto/send-message.dto';
+import { ChatsGateway } from './chats.gateway';
 
 @Injectable()
 export class ChatsService {
+  private readonly logger = new Logger(ChatsService.name);
+
   constructor(
     @InjectModel(Chat.name) private chatModel: Model<ChatDocument>,
     @InjectModel(Message.name) private messageModel: Model<MessageDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
+    @Inject(forwardRef(() => ChatsGateway))
+    private readonly chatsGateway: ChatsGateway,
   ) {}
 
   /**
@@ -33,6 +41,26 @@ export class ChatsService {
   private validateObjectId(id: string, fieldName: string = 'ID'): void {
     if (!this.isValidObjectId(id)) {
       throw new BadRequestException(`Invalid ${fieldName}: ${id}. Must be a valid MongoDB ObjectId.`);
+    }
+  }
+
+  /**
+   * Vérifie si un utilisateur a accès à un chat
+   * Utilisé par le WebSocket Gateway pour vérifier les permissions
+   */
+  async userHasAccessToChat(userId: string, chatId: string): Promise<boolean> {
+    try {
+      const chat = await this.chatModel.findById(chatId).exec();
+
+      if (!chat) {
+        return false;
+      }
+
+      // Vérifier si l'utilisateur est un participant
+      return this.isUserParticipantInChat(chat.participants, userId);
+    } catch (error) {
+      this.logger.error(`Error checking chat access: ${error.message}`);
+      return false;
     }
   }
 
@@ -302,7 +330,38 @@ export class ChatsService {
 
     await chat.save();
 
-    return savedMessage.populate('sender', 'name email profileImageUrl');
+    const populatedMessage = await savedMessage.populate(
+      'sender',
+      'name email profileImageUrl',
+    );
+
+    // Diffuser le message via WebSocket pour les clients connectés
+    try {
+      const sender = populatedMessage.sender as any;
+      this.chatsGateway.broadcastNewMessage(chatId, {
+        _id: populatedMessage._id,
+        id: populatedMessage._id.toString(),
+        text: populatedMessage.text,
+        content: populatedMessage.text,
+        createdAt: populatedMessage.createdAt,
+        sender: {
+          _id: sender._id?.toString() || sender.toString(),
+          id: sender._id?.toString() || sender.toString(),
+          name: sender.name,
+          email: sender.email,
+          profileImageUrl: sender.profileImageUrl,
+          avatar: sender.profileImageUrl,
+        },
+      });
+      this.logger.log(`Message broadcasted via WebSocket for chat ${chatId}`);
+    } catch (error) {
+      // Ne pas bloquer l'envoi du message si la diffusion WebSocket échoue
+      this.logger.warn(
+        `Failed to broadcast message via WebSocket: ${error.message}`,
+      );
+    }
+
+    return populatedMessage;
   }
 
   /**
