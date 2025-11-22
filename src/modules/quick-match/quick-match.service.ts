@@ -161,8 +161,25 @@ export class QuickMatchService {
     );
 
     this.logger.log(
-      `[QuickMatch] User ${userId} - Excluded: liked=${likedUserIds.size}, passed=${passedUserIds.size}, matched=${matchedUserIds.size}`,
+      `[QuickMatch] User ${userId} - Excluded (from database): liked=${likedUserIds.size}, passed=${passedUserIds.size}, matched=${matchedUserIds.size}`,
     );
+    
+    // Log détaillé pour diagnostic
+    if (likedUserIds.size > 0) {
+      this.logger.debug(
+        `[QuickMatch] Liked profile IDs: ${Array.from(likedUserIds).join(', ')}`,
+      );
+    }
+    if (passedUserIds.size > 0) {
+      this.logger.debug(
+        `[QuickMatch] Passed profile IDs: ${Array.from(passedUserIds).join(', ')}`,
+      );
+    }
+    if (matchedUserIds.size > 0) {
+      this.logger.debug(
+        `[QuickMatch] Matched profile IDs: ${Array.from(matchedUserIds).join(', ')}`,
+      );
+    }
 
     // 7. FILTRAGE PROGRESSIF INTELLIGENT - Garantir 100% de résultats sans retourner les likés
     let finalProfiles: any[] = [];
@@ -592,6 +609,10 @@ export class QuickMatchService {
       isMatch,
     });
     await like.save();
+    
+    this.logger.log(
+      `[QuickMatch] ✅ Like saved: User ${userId} liked profile ${profileId} (persistent - will not appear again)`,
+    );
 
     // Créer une notification pour l'utilisateur qui a été liké
     try {
@@ -781,6 +802,10 @@ export class QuickMatchService {
       toUser: new Types.ObjectId(profileId),
     });
     await pass.save();
+    
+    this.logger.log(
+      `[QuickMatch] ✅ Pass saved: User ${userId} passed profile ${profileId} (persistent - will not appear again)`,
+    );
   }
 
   /**
