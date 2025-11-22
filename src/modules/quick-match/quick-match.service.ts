@@ -186,7 +186,7 @@ export class QuickMatchService {
     );
 
     // 11. Double vérification : filtrer les utilisateurs qui ont au moins un sport en commun
-    // Utiliser une logique plus flexible pour détecter les sports similaires
+    // Filtre ASSOUPLI : afficher si UN SEUL sport est en commun (matching flexible)
     let compatibleProfiles = allUsers.filter((user) => {
       const userSports = user.sportsInterests || [];
 
@@ -202,36 +202,47 @@ export class QuickMatchService {
           .replace(/[^a-z0-9]/g, ''); // Enlever tous les caractères non alphanumériques
       };
 
-      // Vérifier s'il y a au moins un sport en commun (matching flexible)
+      // Vérifier s'il y a au moins UN sport en commun (matching très flexible)
       const hasCommonSport = allUserSports.some((sport) => {
         const normalizedSport = normalizeSport(sport);
         return userSports.some((userSport) => {
           const normalizedUserSport = normalizeSport(userSport);
-          // Correspondance exacte après normalisation OU correspondance partielle
+          
+          // Correspondance très flexible :
+          // 1. Correspondance exacte après normalisation
+          // 2. Correspondance partielle (contient)
+          // 3. Correspondance partielle inverse (est contenu)
+          // 4. Correspondance de début de mot (prefixe)
           return (
             normalizedUserSport === normalizedSport ||
             normalizedUserSport.includes(normalizedSport) ||
-            normalizedSport.includes(normalizedUserSport)
+            normalizedSport.includes(normalizedUserSport) ||
+            normalizedUserSport.startsWith(normalizedSport) ||
+            normalizedSport.startsWith(normalizedUserSport)
           );
         });
       });
 
       return hasCommonSport;
     });
+    
+    this.logger.log(
+      `[QuickMatch] Filtering profiles - UN SEUL sport en commun suffit pour afficher`,
+    );
 
     this.logger.log(
       `[QuickMatch] Compatible profiles after sports filter: ${compatibleProfiles.length}`,
     );
 
-    // IMPORTANT: On retourne SEULEMENT les profils avec sports communs
-    // Pas de filtre assoupli - seulement les profils qui partagent au moins un sport
+    // IMPORTANT: On retourne SEULEMENT les profils avec AU MOINS UN sport en commun
+    // Filtre assoupli : un seul sport en commun suffit pour afficher le profil
     if (compatibleProfiles.length === 0) {
       this.logger.warn(
-        `[QuickMatch] No profiles found with common sports. User sports: ${JSON.stringify(allUserSports)}`,
+        `[QuickMatch] No profiles found with at least one common sport. User sports: ${JSON.stringify(allUserSports)}`,
       );
     } else {
       this.logger.log(
-        `[QuickMatch] Found ${compatibleProfiles.length} profiles with common sports (strict filter - no relaxation)`,
+        `[QuickMatch] Found ${compatibleProfiles.length} profiles with at least one common sport (relaxed filter - one sport enough)`,
       );
     }
 
