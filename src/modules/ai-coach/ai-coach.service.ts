@@ -4,8 +4,9 @@ import { GoogleGenerativeAI } from '@google/generative-ai';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import { Activity, ActivityDocument } from '../activities/schemas/activity.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 import { AICoachSuggestionsRequestDto } from './dto/suggestions-request.dto';
-import { AICoachSuggestionsResponseDto, SuggestedActivityDto } from './dto/suggestions-response.dto';
+import { AICoachSuggestionsResponseDto, SuggestedActivityDto, PersonalizedTipDto } from './dto/suggestions-response.dto';
 
 @Injectable()
 export class AICoachService {
@@ -16,6 +17,7 @@ export class AICoachService {
   constructor(
     private configService: ConfigService,
     @InjectModel(Activity.name) private activityModel: Model<ActivityDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {
     this.geminiApiKey = this.configService.get<string>('GEMINI_API_KEY') || '';
 
@@ -45,44 +47,73 @@ export class AICoachService {
         .populate('creator', 'name email profileImageUrl')
         .exec();
 
+      // ✅ NOUVEAU : Récupérer les données utilisateur complètes
+      const user = await this.userModel.findById(userId).exec();
+      const userActivities = await this.activityModel
+        .find({ creator: userId })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .exec();
+
       if (!this.geminiApiKey || this.geminiApiKey === '' || !this.genAI) {
         // Mode fallback si Gemini n'est pas configuré
         this.logger.warn('Using fallback mode for AI Coach suggestions');
         return this.generateFallbackSuggestions(request, activities);
       }
 
-      // Construire le contexte pour Gemini
-      const context = this.buildContext(request, activities);
+      // ✅ Construire un contexte enrichi avec toutes les données
+      const context = this.buildRichContext(request, user, userActivities, activities);
 
       // Appeler Gemini API
       const model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
 
-      const prompt = `Tu es un coach sportif IA. Basé sur les données de fitness suivantes:
+      // ✅ Prompt pour suggestions + conseils
+      const prompt = `Tu es un coach sportif IA personnalisé. Voici les données complètes de l'utilisateur:
 
 ${context}
 
-Propose 3 activités sportives personnalisées qui correspondent au profil de l'utilisateur.
+**TÂCHE 1 : Suggestions d'activités**
 
-Pour chaque activité, réponds UNIQUEMENT avec ce format JSON (sans texte supplémentaire):
+Propose 3 activités sportives personnalisées parmi la liste fournie qui correspondent au profil de l'utilisateur.
+
+**TÂCHE 2 : Conseils personnalisés (Nasy7)**
+
+Basé sur toutes les données (statistiques Strava, profil, historique d'activités), génère 3-5 conseils personnalisés pertinents pour améliorer sa performance, santé, ou motivation.
+
+Format de réponse JSON (STRICT):
 
 {
   "suggestions": [
     {
-      "id": "ID_de_l_activité",
-      "title": "Titre de l'activité",
-      "sportType": "Type de sport",
+      "id": "ID_activité_existant",
+      "title": "Titre",
+      "sportType": "Type",
       "location": "Lieu",
-      "date": "Date",
-      "time": "Heure",
+      "date": "JJ/MM/AAAA",
+      "time": "HH:MM",
       "participants": nombre,
       "maxParticipants": nombre,
       "level": "niveau",
-      "matchScore": score_de_0_à_100
+      "matchScore": score_0_100
+    }
+  ],
+  "personalizedTips": [
+    {
+      "id": "tip-1",
+      "title": "Titre du conseil",
+      "description": "Description détaillée du conseil personnalisé",
+      "icon": "🔥",
+      "category": "training",
+      "priority": "high"
     }
   ]
 }
 
-IMPORTANT: Utilise uniquement les IDs d'activités qui existent dans la liste fournie.`;
+IMPORTANT:
+- Utilise uniquement les IDs d'activités qui existent dans la liste
+- Les conseils doivent être personnalisés selon les données réelles
+- Les catégories possibles: training, nutrition, recovery, motivation, health
+- Les icônes doivent être des emojis pertinents`;
 
       const result = await model.generateContent(prompt);
       const response = await result.response;
@@ -90,8 +121,8 @@ IMPORTANT: Utilise uniquement les IDs d'activités qui existent dans la liste fo
 
       this.logger.debug(`Gemini response: ${text.substring(0, 200)}...`);
 
-      // Parser la réponse JSON de Gemini
-      const parsedResponse = this.parseGeminiResponse(text, activities);
+      // ✅ Parser la réponse JSON complète
+      const parsedResponse = this.parseGeminiJSONResponse(text, activities);
 
       return parsedResponse;
     } catch (error) {
@@ -107,50 +138,71 @@ IMPORTANT: Utilise uniquement les IDs d'activités qui existent dans la liste fo
     }
   }
 
-  private buildContext(request: AICoachSuggestionsRequestDto, activities: any[]): string {
-    let context = `Données de fitness de l'utilisateur:
-- ${request.workouts} entraînement${request.workouts > 1 ? 's' : ''} cette semaine
-- ${request.calories} calories brûlées
-- ${request.minutes} minutes d'activité
-- Série de ${request.streak} jour${request.streak > 1 ? 's' : ''}\n\n`;
+  // ✅ NOUVEAU : Construire un contexte enrichi avec toutes les données
+  private buildRichContext(
+    request: AICoachSuggestionsRequestDto,
+    user: any,
+    userActivities: any[],
+    availableActivities: any[],
+  ): string {
+    let context = `**Données Strava de la semaine:**
+- Entraînements: ${request.workouts}
+- Calories brûlées: ${request.calories}
+- Minutes d'activité: ${request.minutes}
+- Série (streak): ${request.streak} jours`;
 
-    if (request.sportPreferences) {
-      context += `Sports préférés: ${request.sportPreferences}\n\n`;
+    if (user) {
+      context += `\n\n**Profil utilisateur:**
+- Nom: ${user.name || 'Non spécifié'}
+- Localisation: ${user.location || 'Non spécifiée'}
+- Sports préférés: ${user.sportsInterests?.join(', ') || 'Aucun'}
+- Niveau XP: ${user.currentLevel || 1}
+- Total XP: ${user.totalXp || 0}`;
     }
 
-    context += `Activités disponibles dans l'application:\n`;
-    activities.forEach((activity, index) => {
-      const dateStr =
-        activity.date instanceof Date
-          ? activity.date.toLocaleDateString('fr-FR')
-          : String(activity.date);
-      const timeStr =
-        activity.time instanceof Date
-          ? activity.time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
-          : String(activity.time);
+    if (userActivities && userActivities.length > 0) {
+      context += `\n\n**Historique des activités:**
+L'utilisateur a créé ${userActivities.length} activités récemment:`;
+      userActivities.slice(0, 5).forEach((act, idx) => {
+        context += `\n${idx + 1}. ${act.sportType} - ${act.title} (${act.level})`;
+      });
+    }
 
-      context += `${index + 1}. ID: ${activity._id} - ${activity.title} (${activity.sportType}) - ${activity.location} - ${dateStr} ${timeStr} - Niveau: ${activity.level} - Participants: ${activity.participantIds?.length || 0}/${activity.participants || 10}\n`;
+    context += `\n\n**Activités disponibles dans l'app:**`;
+    availableActivities.slice(0, 10).forEach((act, idx) => {
+      const dateStr =
+        act.date instanceof Date
+          ? act.date.toLocaleDateString('fr-FR')
+          : String(act.date);
+      const timeStr =
+        act.time instanceof Date
+          ? act.time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+          : String(act.time);
+      context += `\n${idx + 1}. ID: ${act._id} - ${act.title} (${act.sportType}) - ${act.location} - ${dateStr} ${timeStr} - Niveau: ${act.level} - Participants: ${act.participantIds?.length || 0}/${act.participants || 10}`;
     });
 
     return context;
   }
 
-  private parseGeminiResponse(
+  // ✅ NOUVEAU : Parser la réponse JSON complète
+  private parseGeminiJSONResponse(
     text: string,
     activities: any[],
   ): AICoachSuggestionsResponseDto {
     try {
-      // Nettoyer la réponse (enlever markdown code blocks si présents)
+      // Nettoyer la réponse (enlever markdown code blocks si présent)
       let cleanText = text.trim();
-      if (cleanText.includes('```json')) {
+      if (cleanText.startsWith('```json')) {
         cleanText = cleanText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-      } else if (cleanText.includes('```')) {
+      } else if (cleanText.startsWith('```')) {
         cleanText = cleanText.replace(/```\n?/g, '');
       }
 
       const parsed = JSON.parse(cleanText);
       const suggestions: SuggestedActivityDto[] = [];
+      const personalizedTips: PersonalizedTipDto[] = [];
 
+      // Parser les suggestions
       if (parsed.suggestions && Array.isArray(parsed.suggestions)) {
         parsed.suggestions.forEach((suggestion: any) => {
           // Trouver l'activité correspondante
@@ -183,6 +235,20 @@ IMPORTANT: Utilise uniquement les IDs d'activités qui existent dans la liste fo
               matchScore: suggestion.matchScore || 85,
             });
           }
+        });
+      }
+
+      // Parser les conseils personnalisés
+      if (parsed.personalizedTips && Array.isArray(parsed.personalizedTips)) {
+        parsed.personalizedTips.forEach((tip: any, index: number) => {
+          personalizedTips.push({
+            id: tip.id || `tip-${index + 1}`,
+            title: tip.title || 'Conseil personnalisé',
+            description: tip.description || '',
+            icon: tip.icon || '💡',
+            category: tip.category || 'training',
+            priority: tip.priority || 'medium',
+          });
         });
       }
 
@@ -220,9 +286,13 @@ IMPORTANT: Utilise uniquement les IDs d'activités qui existent dans la liste fo
         });
       }
 
-      return { suggestions: suggestions.slice(0, 3) };
+      return {
+        suggestions: suggestions.slice(0, 3),
+        personalizedTips: personalizedTips.length > 0 ? personalizedTips : undefined,
+      };
     } catch (error) {
-      this.logger.error('Error parsing Gemini response:', error);
+      this.logger.error('Failed to parse Gemini JSON response:', error);
+      this.logger.error('Raw response:', text);
       // En cas d'erreur de parsing, utiliser le fallback
       return this.generateFallbackSuggestions(
         {
@@ -270,7 +340,38 @@ IMPORTANT: Utilise uniquement les IDs d'activités qui existent dans la liste fo
       },
     );
 
-    return { suggestions };
+    // ✅ Conseils par défaut si Gemini n'est pas disponible
+    const defaultTips: PersonalizedTipDto[] = [
+      {
+        id: 'default-tip-1',
+        title: 'Maintenez votre série',
+        description: `Vous avez une série de ${request.streak} jours ! Continuez à vous entraîner régulièrement pour maintenir cette habitude.`,
+        icon: '🔥',
+        category: 'motivation',
+        priority: 'high',
+      },
+      {
+        id: 'default-tip-2',
+        title: 'Augmentez progressivement',
+        description: `Cette semaine, vous avez fait ${request.workouts} entraînements. Essayez d'en ajouter 1 ou 2 de plus la semaine prochaine.`,
+        icon: '📈',
+        category: 'training',
+        priority: 'medium',
+      },
+      {
+        id: 'default-tip-3',
+        title: 'Récupération active',
+        description: "N'oubliez pas de prendre du temps pour récupérer entre les séances d'entraînement.",
+        icon: '🧘',
+        category: 'recovery',
+        priority: 'medium',
+      },
+    ];
+
+    return {
+      suggestions,
+      personalizedTips: defaultTips,
+    };
   }
 }
 
