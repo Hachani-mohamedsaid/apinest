@@ -22,6 +22,7 @@
     "init-challenges": "ts-node -r tsconfig-paths/register scripts/init-all-challenges.ts"
   },
   "dependencies": {
+    "@google/generative-ai": "^0.24.1",
     "@nestjs/common": "^10.0.0",
     "@nestjs/config": "^3.0.0",
     "@nestjs/core": "^10.0.0",
