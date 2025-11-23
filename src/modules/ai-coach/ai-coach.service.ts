@@ -65,7 +65,8 @@ export class AICoachService {
       const context = this.buildRichContext(request, user, userActivities, activities);
 
       // Appeler Gemini API
-      const model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+      // Note: gemini-pro n'est plus disponible, utiliser gemini-1.5-flash ou gemini-1.5-pro
+      const model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
       // ✅ Prompt pour suggestions + conseils
       const prompt = `Tu es un coach sportif IA personnalisé. Voici les données complètes de l'utilisateur:
@@ -115,20 +116,38 @@ IMPORTANT:
 - Les catégories possibles: training, nutrition, recovery, motivation, health
 - Les icônes doivent être des emojis pertinents`;
 
+      this.logger.log('🤖 Calling Gemini API for personalized suggestions and tips...');
+      
       const result = await model.generateContent(prompt);
       const response = await result.response;
       const text = response.text();
 
-      this.logger.debug(`Gemini response: ${text.substring(0, 200)}...`);
+      this.logger.log(`✅ Gemini API response received (${text.length} characters)`);
+      this.logger.debug(`Gemini response preview: ${text.substring(0, 300)}...`);
 
       // ✅ Parser la réponse JSON complète
       const parsedResponse = this.parseGeminiJSONResponse(text, activities);
 
+      // Vérifier si on a des conseils générés par Gemini (pas fallback)
+      if (parsedResponse.personalizedTips && parsedResponse.personalizedTips.length > 0) {
+        const firstTipId = parsedResponse.personalizedTips[0].id;
+        if (!firstTipId.startsWith('default-tip-')) {
+          this.logger.log(`✅ Gemini generated ${parsedResponse.personalizedTips.length} personalized tips`);
+        } else {
+          this.logger.warn('⚠️ Parsed response contains default tips - falling back');
+        }
+      }
+
       return parsedResponse;
     } catch (error) {
-      this.logger.error('Error in AI Coach Gemini:', error);
+      this.logger.error('❌ Error in AI Coach Gemini:', error);
+      this.logger.error('Error details:', error.message);
+      if (error.stack) {
+        this.logger.error('Stack trace:', error.stack);
+      }
 
       // En cas d'erreur, utiliser le fallback
+      this.logger.warn('⚠️ Using fallback mode due to error');
       const activities = await this.activityModel
         .find({ visibility: 'public' })
         .limit(20)
@@ -190,15 +209,28 @@ L'utilisateur a créé ${userActivities.length} activités récemment:`;
     activities: any[],
   ): AICoachSuggestionsResponseDto {
     try {
+      this.logger.debug('🔍 Parsing Gemini JSON response...');
+      
       // Nettoyer la réponse (enlever markdown code blocks si présent)
       let cleanText = text.trim();
-      if (cleanText.startsWith('```json')) {
+      
+      // Chercher le JSON dans la réponse (peut être entouré de texte)
+      const jsonMatch = cleanText.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        cleanText = jsonMatch[0];
+      }
+      
+      if (cleanText.includes('```json')) {
         cleanText = cleanText.replace(/```json\n?/g, '').replace(/```\n?/g, '');
-      } else if (cleanText.startsWith('```')) {
+      } else if (cleanText.includes('```')) {
         cleanText = cleanText.replace(/```\n?/g, '');
       }
 
+      this.logger.debug(`Cleaned JSON text length: ${cleanText.length}`);
+
       const parsed = JSON.parse(cleanText);
+      this.logger.debug('✅ JSON parsed successfully');
+      
       const suggestions: SuggestedActivityDto[] = [];
       const personalizedTips: PersonalizedTipDto[] = [];
 
@@ -240,9 +272,15 @@ L'utilisateur a créé ${userActivities.length} activités récemment:`;
 
       // Parser les conseils personnalisés
       if (parsed.personalizedTips && Array.isArray(parsed.personalizedTips)) {
+        this.logger.log(`📝 Found ${parsed.personalizedTips.length} personalized tips in Gemini response`);
         parsed.personalizedTips.forEach((tip: any, index: number) => {
+          // ✅ Générer un ID unique pour les conseils Gemini (pas "default-tip-")
+          const tipId = tip.id && !tip.id.startsWith('default-tip-') 
+            ? tip.id 
+            : `gemini-tip-${Date.now()}-${index + 1}`;
+          
           personalizedTips.push({
-            id: tip.id || `tip-${index + 1}`,
+            id: tipId,
             title: tip.title || 'Conseil personnalisé',
             description: tip.description || '',
             icon: tip.icon || '💡',
@@ -250,6 +288,10 @@ L'utilisateur a créé ${userActivities.length} activités récemment:`;
             priority: tip.priority || 'medium',
           });
         });
+        this.logger.log(`✅ Parsed ${personalizedTips.length} personalized tips successfully`);
+      } else {
+        this.logger.warn('⚠️ No personalizedTips found in Gemini response');
+        this.logger.debug('Parsed object keys:', Object.keys(parsed));
       }
 
       // Si pas assez de suggestions, compléter avec des activités aléatoires
@@ -286,14 +328,25 @@ L'utilisateur a créé ${userActivities.length} activités récemment:`;
         });
       }
 
-      return {
+      const result = {
         suggestions: suggestions.slice(0, 3),
         personalizedTips: personalizedTips.length > 0 ? personalizedTips : undefined,
       };
+
+      if (result.personalizedTips && result.personalizedTips.length > 0) {
+        this.logger.log(`✅ Successfully parsed ${result.personalizedTips.length} personalized tips from Gemini`);
+      } else {
+        this.logger.warn('⚠️ No personalized tips in final result - will use fallback');
+      }
+
+      return result;
     } catch (error) {
-      this.logger.error('Failed to parse Gemini JSON response:', error);
-      this.logger.error('Raw response:', text);
+      this.logger.error('❌ Failed to parse Gemini JSON response:', error);
+      this.logger.error('Error message:', error.message);
+      this.logger.error('Raw response (first 500 chars):', text.substring(0, 500));
+      
       // En cas d'erreur de parsing, utiliser le fallback
+      this.logger.warn('⚠️ Falling back to default tips due to parsing error');
       return this.generateFallbackSuggestions(
         {
           workouts: 0,
