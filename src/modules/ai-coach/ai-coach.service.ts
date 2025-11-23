@@ -14,6 +14,7 @@ export class AICoachService {
   private readonly logger = new Logger(AICoachService.name);
   private readonly geminiApiKey: string;
   private genAI: GoogleGenerativeAI | null = null;
+  private availableModel: string | null = null; // Modèle disponible détecté
 
   constructor(
     private configService: ConfigService,
@@ -30,10 +31,44 @@ export class AICoachService {
       try {
         this.genAI = new GoogleGenerativeAI(this.geminiApiKey);
         this.logger.log('✅ Google Gemini AI initialized successfully');
+        this.logger.log(`Using Gemini API key: ${this.geminiApiKey.substring(0, 10)}...`);
+        
+        // Essayer de détecter un modèle disponible (en arrière-plan, ne bloque pas)
+        this.detectAvailableModel().catch((error) => {
+          this.logger.warn('Could not detect available model, will try at runtime:', error.message);
+        });
       } catch (error) {
         this.logger.error('❌ Error initializing Google Gemini AI:', error);
       }
     }
+  }
+
+  /**
+   * Détecte un modèle Gemini disponible en testant plusieurs modèles
+   */
+  private async detectAvailableModel(): Promise<void> {
+    if (!this.geminiApiKey || !this.genAI) {
+      return;
+    }
+
+    const modelNames = ['gemini-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+    
+    for (const modelName of modelNames) {
+      try {
+        const model = this.genAI.getGenerativeModel({ model: modelName });
+        // Test simple avec un prompt minimal
+        const result = await model.generateContent('test');
+        await result.response;
+        this.availableModel = modelName;
+        this.logger.log(`✅ Detected available Gemini model: ${modelName}`);
+        return;
+      } catch (error: any) {
+        this.logger.debug(`Model ${modelName} not available: ${error.message}`);
+        continue;
+      }
+    }
+    
+    this.logger.warn('⚠️ No Gemini model detected, will use fallback');
   }
 
   async getPersonalizedSuggestions(
@@ -121,36 +156,61 @@ IMPORTANT:
       // Essayer d'abord avec le SDK
       let text: string;
       try {
-        const model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+        // Utiliser le modèle détecté, ou essayer gemini-pro par défaut
+        const modelName = this.availableModel || 'gemini-pro';
+        const model = this.genAI.getGenerativeModel({ model: modelName });
         const result = await model.generateContent(prompt);
         const response = await result.response;
         text = response.text();
       } catch (sdkError: any) {
         // Si le SDK échoue, essayer avec l'API REST directement
         this.logger.warn('SDK failed, trying REST API directly...');
-        try {
-          const restResponse = await axios.post(
-            `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${this.geminiApiKey}`,
-            {
-              contents: [{
-                parts: [{
-                  text: prompt
-                }]
-              }]
-            },
-            {
-              headers: {
-                'Content-Type': 'application/json'
+        
+        // Essayer différents modèles et versions d'API
+        const apiVersions = ['v1', 'v1beta'];
+        const modelNames = ['gemini-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'];
+        let restSuccess = false;
+        
+        for (const apiVersion of apiVersions) {
+          for (const modelName of modelNames) {
+            try {
+              this.logger.debug(`Trying REST API: ${apiVersion}/models/${modelName}`);
+              const restResponse = await axios.post(
+                `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${this.geminiApiKey}`,
+                {
+                  contents: [{
+                    parts: [{
+                      text: prompt
+                    }]
+                  }]
+                },
+                {
+                  headers: {
+                    'Content-Type': 'application/json'
+                  },
+                  timeout: 30000
+                }
+              );
+              
+              if (restResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
+                text = restResponse.data.candidates[0].content.parts[0].text;
+                this.logger.log(`✅ Successfully called Gemini via REST API (${apiVersion}/${modelName})`);
+                restSuccess = true;
+                break;
               }
+            } catch (restError: any) {
+              // Continuer avec le prochain modèle/version
+              this.logger.debug(`REST API failed for ${apiVersion}/${modelName}: ${restError.response?.status || restError.message}`);
+              continue;
             }
-          );
-          
-          text = restResponse.data.candidates[0].content.parts[0].text;
-          this.logger.log('✅ Successfully called Gemini via REST API');
-        } catch (restError: any) {
-          // Si les deux échouent, lancer l'erreur pour utiliser le fallback
-          this.logger.error('Both SDK and REST API failed:', restError.message);
-          throw restError;
+          }
+          if (restSuccess) break;
+        }
+        
+        if (!restSuccess) {
+          // Si tous les modèles/versions échouent, lancer l'erreur pour utiliser le fallback
+          this.logger.error('All Gemini API attempts failed, using fallback');
+          throw new Error('No available Gemini model found');
         }
       }
 
