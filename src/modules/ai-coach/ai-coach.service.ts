@@ -3,6 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
+import axios from 'axios';
 import { Activity, ActivityDocument } from '../activities/schemas/activity.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AICoachSuggestionsRequestDto } from './dto/suggestions-request.dto';
@@ -64,11 +65,10 @@ export class AICoachService {
       // ✅ Construire un contexte enrichi avec toutes les données
       const context = this.buildRichContext(request, user, userActivities, activities);
 
-      // Appeler Gemini API
-      // Note: gemini-pro n'est plus disponible, utiliser gemini-1.5-flash ou gemini-1.5-pro
-      const model = this.genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
-
-      // ✅ Prompt pour suggestions + conseils
+      // Appeler Gemini API via REST (plus de contrôle sur la version de l'API)
+      // Note: Le SDK peut avoir des problèmes avec certains modèles
+      // Utiliser l'API REST directement pour plus de flexibilité
+      
       const prompt = `Tu es un coach sportif IA personnalisé. Voici les données complètes de l'utilisateur:
 
 ${context}
@@ -118,9 +118,41 @@ IMPORTANT:
 
       this.logger.log('🤖 Calling Gemini API for personalized suggestions and tips...');
       
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      const text = response.text();
+      // Essayer d'abord avec le SDK
+      let text: string;
+      try {
+        const model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+        const result = await model.generateContent(prompt);
+        const response = await result.response;
+        text = response.text();
+      } catch (sdkError: any) {
+        // Si le SDK échoue, essayer avec l'API REST directement
+        this.logger.warn('SDK failed, trying REST API directly...');
+        try {
+          const restResponse = await axios.post(
+            `https://generativelanguage.googleapis.com/v1/models/gemini-pro:generateContent?key=${this.geminiApiKey}`,
+            {
+              contents: [{
+                parts: [{
+                  text: prompt
+                }]
+              }]
+            },
+            {
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            }
+          );
+          
+          text = restResponse.data.candidates[0].content.parts[0].text;
+          this.logger.log('✅ Successfully called Gemini via REST API');
+        } catch (restError: any) {
+          // Si les deux échouent, lancer l'erreur pour utiliser le fallback
+          this.logger.error('Both SDK and REST API failed:', restError.message);
+          throw restError;
+        }
+      }
 
       this.logger.log(`✅ Gemini API response received (${text.length} characters)`);
       this.logger.debug(`Gemini response preview: ${text.substring(0, 300)}...`);
