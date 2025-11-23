@@ -126,7 +126,7 @@ IMPORTANT:
       this.logger.debug(`Gemini response preview: ${text.substring(0, 300)}...`);
 
       // ✅ Parser la réponse JSON complète
-      const parsedResponse = this.parseGeminiJSONResponse(text, activities);
+      const parsedResponse = this.parseGeminiJSONResponse(text, activities, request);
 
       // Vérifier si on a des conseils générés par Gemini (pas fallback)
       if (parsedResponse.personalizedTips && parsedResponse.personalizedTips.length > 0) {
@@ -207,6 +207,7 @@ L'utilisateur a créé ${userActivities.length} activités récemment:`;
   private parseGeminiJSONResponse(
     text: string,
     activities: any[],
+    request: AICoachSuggestionsRequestDto,
   ): AICoachSuggestionsResponseDto {
     try {
       this.logger.debug('🔍 Parsing Gemini JSON response...');
@@ -328,16 +329,22 @@ L'utilisateur a créé ${userActivities.length} activités récemment:`;
         });
       }
 
+      // Si pas de conseils générés par Gemini, utiliser le fallback pour les conseils
+      if (personalizedTips.length === 0) {
+        this.logger.warn('⚠️ No personalized tips parsed from Gemini - using fallback tips');
+        const fallbackTips = this.generateDefaultTips(request);
+        return {
+          suggestions: suggestions.slice(0, 3),
+          personalizedTips: fallbackTips,
+        };
+      }
+
       const result = {
         suggestions: suggestions.slice(0, 3),
-        personalizedTips: personalizedTips.length > 0 ? personalizedTips : undefined,
+        personalizedTips: personalizedTips,
       };
 
-      if (result.personalizedTips && result.personalizedTips.length > 0) {
-        this.logger.log(`✅ Successfully parsed ${result.personalizedTips.length} personalized tips from Gemini`);
-      } else {
-        this.logger.warn('⚠️ No personalized tips in final result - will use fallback');
-      }
+      this.logger.log(`✅ Successfully parsed ${result.personalizedTips.length} personalized tips from Gemini`);
 
       return result;
     } catch (error) {
@@ -393,12 +400,19 @@ L'utilisateur a créé ${userActivities.length} activités récemment:`;
       },
     );
 
-    // ✅ Conseils par défaut si Gemini n'est pas disponible
-    const defaultTips: PersonalizedTipDto[] = [
+    return {
+      suggestions,
+      personalizedTips: this.generateDefaultTips(request),
+    };
+  }
+
+  // ✅ Méthode séparée pour générer les conseils par défaut
+  private generateDefaultTips(request: AICoachSuggestionsRequestDto): PersonalizedTipDto[] {
+    return [
       {
         id: 'default-tip-1',
         title: 'Maintenez votre série',
-        description: `Vous avez une série de ${request.streak} jours ! Continuez à vous entraîner régulièrement pour maintenir cette habitude.`,
+        description: `Vous avez une série de ${request.streak} jour${request.streak > 1 ? 's' : ''} ! Continuez à vous entraîner régulièrement pour maintenir cette habitude.`,
         icon: '🔥',
         category: 'motivation',
         priority: 'high',
@@ -406,7 +420,7 @@ L'utilisateur a créé ${userActivities.length} activités récemment:`;
       {
         id: 'default-tip-2',
         title: 'Augmentez progressivement',
-        description: `Cette semaine, vous avez fait ${request.workouts} entraînements. Essayez d'en ajouter 1 ou 2 de plus la semaine prochaine.`,
+        description: `Cette semaine, vous avez fait ${request.workouts} entraînement${request.workouts > 1 ? 's' : ''}. Essayez d'en ajouter 1 ou 2 de plus la semaine prochaine.`,
         icon: '📈',
         category: 'training',
         priority: 'medium',
@@ -420,11 +434,6 @@ L'utilisateur a créé ${userActivities.length} activités récemment:`;
         priority: 'medium',
       },
     ];
-
-    return {
-      suggestions,
-      personalizedTips: defaultTips,
-    };
   }
 }
 
