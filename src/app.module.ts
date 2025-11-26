@@ -11,6 +11,7 @@ import { AIMatchmakerModule } from './modules/ai-matchmaker/ai-matchmaker.module
 import { AICoachModule } from './modules/ai-coach/ai-coach.module';
 import { AchievementsModule } from './modules/achievements/achievements.module';
 import { StravaModule } from './modules/strava/strava.module';
+import { CoachVerificationModule } from './modules/coach-verification/coach-verification.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -47,6 +48,7 @@ import { HealthController } from './health.controller';
     AICoachModule,
     AchievementsModule,
     StravaModule,
+    CoachVerificationModule,
   ],
   controllers: [HealthController],
 })
