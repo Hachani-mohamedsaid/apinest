@@ -1036,14 +1036,20 @@ class TokenManager @Inject constructor(
 
 ## 🎨 Améliorations Possibles
 
-### 1. Upload de fichiers réels
+### 1. Upload de fichiers réels ✅
 
-Pour uploader de vrais fichiers (images, PDFs), vous devrez :
+**L'endpoint d'upload est maintenant disponible !** 
 
-1. **Créer un endpoint d'upload** dans le backend
-2. **Utiliser un File Picker** dans Android
-3. **Uploader les fichiers** vers un service de stockage (AWS S3, Cloudinary, etc.)
-4. **Récupérer les URLs** et les passer à l'endpoint de vérification
+Consultez le guide complet : **[GUIDE_UPLOAD_DOCUMENTS_VERIFICATION_AI.md](../GUIDE_UPLOAD_DOCUMENTS_VERIFICATION_AI.md)**
+
+L'endpoint `POST /files/upload` permet d'uploader des images (JPG, PNG, GIF, WEBP) et des PDFs (max 10MB). Les fichiers sont stockés via imgbb et l'URL est retournée pour être utilisée dans la vérification.
+
+**Exemple d'utilisation :**
+```kotlin
+// Voir le guide complet pour l'implémentation complète
+val response = fileUploadApiService.uploadFile(token, file)
+val documentUrl = response.body()?.url
+```
 
 ### 2. Gestion d'images avec Coil
 

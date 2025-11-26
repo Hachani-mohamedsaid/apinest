@@ -12,6 +12,7 @@ import { AICoachModule } from './modules/ai-coach/ai-coach.module';
 import { AchievementsModule } from './modules/achievements/achievements.module';
 import { StravaModule } from './modules/strava/strava.module';
 import { CoachVerificationModule } from './modules/coach-verification/coach-verification.module';
+import { FilesModule } from './modules/files/files.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -49,6 +50,7 @@ import { HealthController } from './health.controller';
     AchievementsModule,
     StravaModule,
     CoachVerificationModule,
+    FilesModule,
   ],
   controllers: [HealthController],
 })
