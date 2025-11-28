@@ -14,7 +14,7 @@ export class StripeService {
       this.logger.warn('⚠️ STRIPE_SECRET_KEY not configured. Stripe functionality will be disabled.');
     } else {
       this.stripe = new Stripe(secretKey, {
-        apiVersion: '2023-10-16',
+        apiVersion: '2025-11-17.clover',
       });
       this.logger.log('✅ Stripe configured successfully');
     }
