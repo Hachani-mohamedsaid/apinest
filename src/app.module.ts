@@ -13,6 +13,7 @@ import { AchievementsModule } from './modules/achievements/achievements.module';
 import { StravaModule } from './modules/strava/strava.module';
 import { CoachVerificationModule } from './modules/coach-verification/coach-verification.module';
 import { FilesModule } from './modules/files/files.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -51,6 +52,7 @@ import { HealthController } from './health.controller';
     StravaModule,
     CoachVerificationModule,
     FilesModule,
+    PaymentsModule,
   ],
   controllers: [HealthController],
 })
