@@ -277,6 +277,178 @@ export class ActivitiesService {
     }
   }
 
+  /**
+   * Récupérer uniquement les sessions de coach (avec prix)
+   * @param visibility - Filtre par visibilité ('public' ou 'friends')
+   * @param userId - ID de l'utilisateur (requis pour 'friends')
+   */
+  async findCoachSessions(visibility?: string, userId?: string): Promise<ActivityDocument[]> {
+    if (visibility === 'friends') {
+      // Pour "friends", nécessite authentification
+      if (!userId) {
+        throw new UnauthorizedException(
+          'Authentication required for friends visibility',
+        );
+      }
+      return this.getFriendsCoachSessions(userId);
+    }
+
+    // Pour "public" ou par défaut, retourner les sessions de coach publiques
+    const query: any = {
+      visibility: 'public',
+      price: { $exists: true, $gt: 0 },
+      isCompleted: false,
+    };
+
+    return this.activityModel
+      .find(query)
+      .populate('creator', 'name email profileImageUrl')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  /**
+   * Récupérer uniquement les activités individuelles (sans prix)
+   * @param visibility - Filtre par visibilité ('public' ou 'friends')
+   * @param userId - ID de l'utilisateur (requis pour 'friends')
+   */
+  async findIndividualActivities(visibility?: string, userId?: string): Promise<ActivityDocument[]> {
+    if (visibility === 'friends') {
+      // Pour "friends", nécessite authentification
+      if (!userId) {
+        throw new UnauthorizedException(
+          'Authentication required for friends visibility',
+        );
+      }
+      return this.getFriendsIndividualActivities(userId);
+    }
+
+    // Pour "public" ou par défaut, retourner les activités individuelles publiques
+    const query: any = {
+      visibility: 'public',
+      $or: [
+        { price: { $exists: false } },
+        { price: null },
+        { price: 0 },
+      ],
+      isCompleted: false,
+    };
+
+    return this.activityModel
+      .find(query)
+      .populate('creator', 'name email profileImageUrl')
+      .sort({ createdAt: -1 })
+      .exec();
+  }
+
+  /**
+   * Récupérer les sessions de coach "friends"
+   */
+  private async getFriendsCoachSessions(userId: string): Promise<ActivityDocument[]> {
+    try {
+      // 1. Récupérer tous les matches de l'utilisateur
+      const matches = await this.matchModel
+        .find({
+          $or: [
+            { user1: new Types.ObjectId(userId) },
+            { user2: new Types.ObjectId(userId) },
+          ],
+        })
+        .exec();
+
+      // 2. Extraire les IDs des utilisateurs avec qui on a matché
+      const matchedUserIds = matches.map((match) => {
+        if (match.user1.toString() === userId) {
+          return match.user2;
+        } else {
+          return match.user1;
+        }
+      });
+
+      // 3. Ajouter l'utilisateur connecté lui-même
+      const allowedUserIds = [
+        new Types.ObjectId(userId),
+        ...matchedUserIds,
+      ];
+
+      // 4. Récupérer les sessions de coach créées par ces utilisateurs avec visibility="friends"
+      const activities = await this.activityModel
+        .find({
+          creator: { $in: allowedUserIds },
+          visibility: 'friends',
+          price: { $exists: true, $gt: 0 },
+          isCompleted: false,
+        })
+        .populate('creator', 'name email profileImageUrl')
+        .sort({ createdAt: -1 })
+        .exec();
+
+      return activities;
+    } catch (error) {
+      this.logger.error(
+        `[ActivitiesService] Error getting friends coach sessions: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
+  /**
+   * Récupérer les activités individuelles "friends"
+   */
+  private async getFriendsIndividualActivities(userId: string): Promise<ActivityDocument[]> {
+    try {
+      // 1. Récupérer tous les matches de l'utilisateur
+      const matches = await this.matchModel
+        .find({
+          $or: [
+            { user1: new Types.ObjectId(userId) },
+            { user2: new Types.ObjectId(userId) },
+          ],
+        })
+        .exec();
+
+      // 2. Extraire les IDs des utilisateurs avec qui on a matché
+      const matchedUserIds = matches.map((match) => {
+        if (match.user1.toString() === userId) {
+          return match.user2;
+        } else {
+          return match.user1;
+        }
+      });
+
+      // 3. Ajouter l'utilisateur connecté lui-même
+      const allowedUserIds = [
+        new Types.ObjectId(userId),
+        ...matchedUserIds,
+      ];
+
+      // 4. Récupérer les activités individuelles créées par ces utilisateurs avec visibility="friends"
+      const activities = await this.activityModel
+        .find({
+          creator: { $in: allowedUserIds },
+          visibility: 'friends',
+          $or: [
+            { price: { $exists: false } },
+            { price: null },
+            { price: 0 },
+          ],
+          isCompleted: false,
+        })
+        .populate('creator', 'name email profileImageUrl')
+        .sort({ createdAt: -1 })
+        .exec();
+
+      return activities;
+    } catch (error) {
+      this.logger.error(
+        `[ActivitiesService] Error getting friends individual activities: ${error.message}`,
+        error.stack,
+      );
+      throw error;
+    }
+  }
+
   async findMyActivities(userId: string): Promise<ActivityDocument[]> {
     return this.activityModel
       .find({ creator: userId })

@@ -72,6 +72,56 @@ export class ActivitiesController {
     return this.activitiesService.findAll(visibility, userId);
   }
 
+  @Get('coach-sessions')
+  @ApiOperation({
+    summary: 'Get coach sessions (with price)',
+    description: 'Get only activities with a price (coach sessions). Filtered at database level for better performance.',
+  })
+  @ApiQuery({
+    name: 'visibility',
+    required: false,
+    enum: ['public', 'friends'],
+    description:
+      'Filter by visibility. "friends" requires JWT authentication and returns coach sessions from matched users only.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of coach sessions retrieved successfully',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Authentication required for friends visibility',
+  })
+  async getCoachSessions(@Query('visibility') visibility?: string, @Request() req?: any) {
+    const userId = req?.user?._id?.toString() || undefined;
+    return this.activitiesService.findCoachSessions(visibility, userId);
+  }
+
+  @Get('individual')
+  @ApiOperation({
+    summary: 'Get individual activities (without price)',
+    description: 'Get only activities without a price (individual activities). Filtered at database level for better performance.',
+  })
+  @ApiQuery({
+    name: 'visibility',
+    required: false,
+    enum: ['public', 'friends'],
+    description:
+      'Filter by visibility. "friends" requires JWT authentication and returns individual activities from matched users only.',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'List of individual activities retrieved successfully',
+  })
+  @ApiResponse({
+    status: 401,
+    description: 'Authentication required for friends visibility',
+  })
+  async getIndividualActivities(@Query('visibility') visibility?: string, @Request() req?: any) {
+    const userId = req?.user?._id?.toString() || undefined;
+    return this.activitiesService.findIndividualActivities(visibility, userId);
+  }
+
   @Get('my-activities')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
