@@ -23,7 +23,7 @@ export class UsersController {
   @Get('profile')
   @UseGuards(JwtAuthGuard)
   async getProfile(@Request() req) {
-    const user = await this.usersService.findById(req.user._id.toString());
+    const user = await this.usersService.findById(req.user.sub);
     
     if (!user) {
       return req.user;
@@ -97,7 +97,7 @@ export class UsersController {
     @Request() req,
   ) {
     // Vérifier que l'utilisateur modifie son propre profil
-    if (!req.user?._id || req.user._id.toString() !== userId) {
+    if (req.user.sub !== userId) {
       throw new ForbiddenException('You can only update your own profile');
     }
 
