@@ -44,6 +44,10 @@ export class Activity {
   @Prop({ required: true, enum: ['public', 'friends'], default: 'public' })
   visibility: string;
 
+  // ✅ NOUVEAU : Champ price pour les sessions payantes
+  @Prop({ required: false, type: Number, min: 0 })
+  price?: number;
+
   @Prop({ default: false })
   isCompleted?: boolean;
 }

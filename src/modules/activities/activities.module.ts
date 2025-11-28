@@ -10,6 +10,7 @@ import { Activity, ActivitySchema } from './schemas/activity.schema';
 import { ActivityMessage, ActivityMessageSchema } from './schemas/activity-message.schema';
 import { ActivityLog, ActivityLogSchema } from '../achievements/schemas/activity-log.schema';
 import { Match, MatchSchema } from '../quick-match/schemas/match.schema';
+import { User, UserSchema } from '../users/schemas/user.schema';
 import { UsersModule } from '../users/users.module';
 import { ChatsModule } from '../chats/chats.module';
 import { AchievementsModule } from '../achievements/achievements.module';
@@ -21,6 +22,7 @@ import { AchievementsModule } from '../achievements/achievements.module';
       { name: ActivityMessage.name, schema: ActivityMessageSchema },
       { name: ActivityLog.name, schema: ActivityLogSchema },
       { name: Match.name, schema: MatchSchema },
+      { name: User.name, schema: UserSchema },
     ]),
     JwtModule.registerAsync({
       imports: [ConfigModule],

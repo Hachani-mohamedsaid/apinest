@@ -110,5 +110,16 @@ export class CreateActivityDto {
     message: 'Visibility must be either "public" or "friends"',
   })
   visibility: string;
+
+  // ✅ NOUVEAU : Champ price optionnel pour les sessions payantes
+  @ApiPropertyOptional({
+    example: 25.50,
+    description: 'Price for the session (only verified coaches can set a price)',
+    minimum: 0,
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'Price must be a number' })
+  @Min(0, { message: 'Price must be greater than or equal to 0' })
+  price?: number;
 }
 

@@ -17,6 +17,7 @@ import { BadgeService } from '../achievements/services/badge.service';
 import { ChallengeService } from '../achievements/services/challenge.service';
 import { ActivityLog, ActivityLogDocument } from '../achievements/schemas/activity-log.schema';
 import { Match, MatchDocument } from '../quick-match/schemas/match.schema';
+import { User, UserDocument } from '../users/schemas/user.schema';
 
 @Injectable()
 export class ActivitiesService {
@@ -26,6 +27,7 @@ export class ActivitiesService {
     @InjectModel(Activity.name) private activityModel: Model<ActivityDocument>,
     @InjectModel(ActivityLog.name) private activityLogModel: Model<ActivityLogDocument>,
     @InjectModel(Match.name) private matchModel: Model<MatchDocument>,
+    @InjectModel(User.name) private userModel: Model<UserDocument>,
     private readonly xpService: XpService,
     private readonly streakService: StreakService,
     private readonly badgeService: BadgeService,
@@ -56,6 +58,25 @@ export class ActivitiesService {
     this.logger.log(
       `[ActivitiesService] ========================================`,
     );
+    
+    // ✅ NOUVEAU : Vérifier que l'utilisateur existe
+    const user = await this.userModel.findById(userId);
+    if (!user) {
+      throw new UnauthorizedException('User not found');
+    }
+
+    // ✅ NOUVEAU : Vérifier que si un prix est fourni, l'utilisateur doit être un coach vérifié
+    if (createActivityDto.price !== undefined && createActivityDto.price !== null) {
+      if (!user.isCoachVerified) {
+        throw new BadRequestException('Only verified coaches can create paid sessions');
+      }
+      if (createActivityDto.price < 0) {
+        throw new BadRequestException('Price must be greater than or equal to 0');
+      }
+      this.logger.log(
+        `[ActivitiesService] 💰 Creating paid session with price: ${createActivityDto.price} by verified coach ${userId}`,
+      );
+    }
     
     // Combine date and time into a single datetime
     const activityDateTime = this.combineDateAndTime(createActivityDto.date, createActivityDto.time);
