@@ -312,6 +312,10 @@ export class UsersService {
       }
     };
 
+    // Calculer le nombre de followers et following
+    const followersCount = user.followers?.length || user.followersCount || 0;
+    const followingCount = user.following?.length || user.followingCount || 0;
+
     return {
       id: user._id.toString(),
       _id: user._id.toString(),
@@ -332,11 +336,13 @@ export class UsersService {
       stats: {
         sessionsJoined: activitiesJoined || 0,
         sessionsHosted: activitiesHosted || 0,
-        followers: 0, // À implémenter si vous avez un système de followers
-        following: 0, // À implémenter si vous avez un système de following
+        followers: followersCount,
+        following: followingCount,
         favoriteSports: user.sportsInterests || [],
       },
       // Champs additionnels pour compatibilité
+      followers: followersCount,
+      following: followingCount,
       avatarUrl: user.profileImageUrl || user.profileImageThumbnailUrl || null,
       coverImageUrl: user.profileImageUrl || user.profileImageThumbnailUrl || null,
       interests: user.sportsInterests || [],
@@ -375,6 +381,118 @@ export class UsersService {
     }
 
     return updatedUser;
+  }
+
+  /**
+   * Suivre un utilisateur
+   * @param currentUserId ID de l'utilisateur connecté
+   * @param targetUserId ID de l'utilisateur à suivre
+   */
+  async followUser(currentUserId: string, targetUserId: string): Promise<{ message: string }> {
+    // Vérifier que l'utilisateur cible existe
+    const targetUser = await this.userModel.findById(targetUserId);
+    if (!targetUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Vérifier qu'on ne suit pas soi-même
+    if (currentUserId === targetUserId) {
+      throw new BadRequestException('Cannot follow yourself');
+    }
+
+    // Vérifier que l'utilisateur connecté existe
+    const currentUser = await this.userModel.findById(currentUserId);
+    if (!currentUser) {
+      throw new NotFoundException('Current user not found');
+    }
+
+    // Vérifier si déjà suivi
+    if (currentUser.following && currentUser.following.includes(targetUserId)) {
+      throw new BadRequestException('Already following this user');
+    }
+
+    // Ajouter targetUserId à la liste following de currentUser
+    await this.userModel.findByIdAndUpdate(
+      currentUserId,
+      {
+        $addToSet: { following: targetUserId },
+        $inc: { followingCount: 1 },
+      },
+      { new: true },
+    );
+
+    // Ajouter currentUserId à la liste followers de targetUser
+    await this.userModel.findByIdAndUpdate(
+      targetUserId,
+      {
+        $addToSet: { followers: currentUserId },
+        $inc: { followersCount: 1 },
+      },
+      { new: true },
+    );
+
+    return { message: 'Successfully followed user' };
+  }
+
+  /**
+   * Ne plus suivre un utilisateur
+   * @param currentUserId ID de l'utilisateur connecté
+   * @param targetUserId ID de l'utilisateur à ne plus suivre
+   */
+  async unfollowUser(currentUserId: string, targetUserId: string): Promise<{ message: string }> {
+    // Vérifier que l'utilisateur cible existe
+    const targetUser = await this.userModel.findById(targetUserId);
+    if (!targetUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    // Vérifier que l'utilisateur connecté existe
+    const currentUser = await this.userModel.findById(currentUserId);
+    if (!currentUser) {
+      throw new NotFoundException('Current user not found');
+    }
+
+    // Vérifier si on suit déjà cet utilisateur
+    if (!currentUser.following || !currentUser.following.includes(targetUserId)) {
+      throw new BadRequestException('Not following this user');
+    }
+
+    // Retirer targetUserId de la liste following de currentUser
+    await this.userModel.findByIdAndUpdate(
+      currentUserId,
+      {
+        $pull: { following: targetUserId },
+        $inc: { followingCount: -1 },
+      },
+      { new: true },
+    );
+
+    // Retirer currentUserId de la liste followers de targetUser
+    await this.userModel.findByIdAndUpdate(
+      targetUserId,
+      {
+        $pull: { followers: currentUserId },
+        $inc: { followersCount: -1 },
+      },
+      { new: true },
+    );
+
+    return { message: 'Successfully unfollowed user' };
+  }
+
+  /**
+   * Vérifier si un utilisateur suit un autre
+   * @param currentUserId ID de l'utilisateur connecté
+   * @param targetUserId ID de l'utilisateur à vérifier
+   */
+  async isFollowing(currentUserId: string, targetUserId: string): Promise<{ isFollowing: boolean }> {
+    const currentUser = await this.userModel.findById(currentUserId);
+    if (!currentUser) {
+      throw new NotFoundException('Current user not found');
+    }
+
+    const isFollowing = currentUser.following ? currentUser.following.includes(targetUserId) : false;
+    return { isFollowing };
   }
 }
 

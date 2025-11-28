@@ -1,5 +1,5 @@
 import {
-  Body,Controller,Delete,Patch,Param,Get, Request,UploadedFile,UseGuards, UseInterceptors,  ForbiddenException, Query,
+  Body,Controller,Delete,Patch,Param,Get,Post, Request,UploadedFile,UseGuards, UseInterceptors,  ForbiddenException, Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UsersService } from './users.service';
@@ -9,6 +9,7 @@ import { Express } from 'express';
 import { memoryStorage } from 'multer';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CoachVerificationStatusDto } from './dto/coach-verification-status.dto';
+import { IsFollowingResponseDto } from './dto/is-following-response.dto';
 
 @Controller('users')
 export class UsersController {
@@ -49,6 +50,27 @@ export class UsersController {
   @UseGuards(JwtAuthGuard)
   getUserProfileById(@Param('id') userId: string) {
     return this.usersService.getUserProfileById(userId);
+  }
+
+  @Get(':id/is-following')
+  @UseGuards(JwtAuthGuard)
+  async isFollowing(@Param('id') targetUserId: string, @Request() req): Promise<IsFollowingResponseDto> {
+    const currentUserId = req.user.sub;
+    return this.usersService.isFollowing(currentUserId, targetUserId);
+  }
+
+  @Post(':id/follow')
+  @UseGuards(JwtAuthGuard)
+  async followUser(@Param('id') targetUserId: string, @Request() req) {
+    const currentUserId = req.user.sub;
+    return this.usersService.followUser(currentUserId, targetUserId);
+  }
+
+  @Post(':id/unfollow')
+  @UseGuards(JwtAuthGuard)
+  async unfollowUser(@Param('id') targetUserId: string, @Request() req) {
+    const currentUserId = req.user.sub;
+    return this.usersService.unfollowUser(currentUserId, targetUserId);
   }
 
   @Get(':id')

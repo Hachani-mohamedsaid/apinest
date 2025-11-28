@@ -88,7 +88,25 @@ export class User {
     verificationReasons?: string[];
     verifiedAt?: Date;
   };
+
+  // Follow/Unfollow System Fields
+  @Prop({ type: [{ type: String }], default: [] })
+  followers?: string[]; // IDs des utilisateurs qui suivent cet utilisateur
+
+  @Prop({ type: [{ type: String }], default: [] })
+  following?: string[]; // IDs des utilisateurs que cet utilisateur suit
+
+  // Statistiques calculées (optionnel, peut être calculé depuis followers.length)
+  @Prop({ default: 0 })
+  followersCount?: number;
+
+  @Prop({ default: 0 })
+  followingCount?: number;
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);
+
+// Index pour améliorer les performances des requêtes
+UserSchema.index({ followers: 1 });
+UserSchema.index({ following: 1 });
 
