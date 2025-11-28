@@ -68,6 +68,26 @@ export class User {
 
   @Prop({ default: 0 })
   bestStreak?: number;
+
+  // Coach Verification Fields
+  @Prop({ default: false })
+  isCoachVerified?: boolean;
+
+  @Prop({
+    type: {
+      coachName: String,
+      confidenceScore: Number,
+      verificationReasons: [String],
+      verifiedAt: Date,
+    },
+    default: null,
+  })
+  coachVerificationData?: {
+    coachName?: string;
+    confidenceScore?: number;
+    verificationReasons?: string[];
+    verifiedAt?: Date;
+  };
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

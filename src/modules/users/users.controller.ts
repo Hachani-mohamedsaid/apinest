@@ -8,6 +8,7 @@ import { UpdateProfileDto } from './dto/update-profile.dto';
 import { Express } from 'express';
 import { memoryStorage } from 'multer';
 import { ChangePasswordDto } from './dto/change-password.dto';
+import { CoachVerificationStatusDto } from './dto/coach-verification-status.dto';
 
 @Controller('users')
 export class UsersController {
@@ -21,8 +22,21 @@ export class UsersController {
 
   @Get('profile')
   @UseGuards(JwtAuthGuard)
-  getProfile(@Request() req) {
-    return req.user;
+  async getProfile(@Request() req) {
+    const user = await this.usersService.findById(req.user._id.toString());
+    
+    if (!user) {
+      return req.user;
+    }
+
+    const userObj = user.toObject();
+    const { password, ...userWithoutPassword } = userObj;
+
+    return {
+      ...userWithoutPassword,
+      isCoachVerified: user.isCoachVerified || false,
+      coachVerificationData: user.coachVerificationData || null,
+    };
   }
 
   @Get('search')
@@ -73,6 +87,21 @@ export class UsersController {
     }
 
     return this.usersService.changePassword(id, changePasswordDto.currentPassword, changePasswordDto.newPassword);
+  }
+
+  @Patch(':id/coach-verification')
+  @UseGuards(JwtAuthGuard)
+  async updateCoachVerificationStatus(
+    @Param('id') userId: string,
+    @Body() dto: CoachVerificationStatusDto,
+    @Request() req,
+  ) {
+    // Vérifier que l'utilisateur modifie son propre profil
+    if (!req.user?._id || req.user._id.toString() !== userId) {
+      throw new ForbiddenException('You can only update your own profile');
+    }
+
+    return this.usersService.updateCoachVerificationStatus(userId, dto);
   }
 
   @Delete(':id')

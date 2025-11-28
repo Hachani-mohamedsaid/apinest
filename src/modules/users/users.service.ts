@@ -8,6 +8,7 @@ import { Express } from 'express';
 import { User, UserDocument } from './schemas/user.schema';
 import { Activity, ActivityDocument } from '../activities/schemas/activity.schema';
 import { UpdateProfileDto } from './dto/update-profile.dto';
+import { CoachVerificationStatusDto } from './dto/coach-verification-status.dto';
 import { MailService } from '../mail/mail.service';
 import * as crypto from 'crypto';
 import * as bcrypt from 'bcrypt';
@@ -342,6 +343,38 @@ export class UsersService {
       rating: 0, // À implémenter si vous avez un système de rating
       activitiesJoined: activitiesJoined || 0,
     };
+  }
+
+  async updateCoachVerificationStatus(
+    userId: string,
+    dto: CoachVerificationStatusDto,
+  ): Promise<UserDocument> {
+    const updateData: any = {
+      isCoachVerified: dto.isCoachVerified,
+    };
+
+    if (dto.isCoachVerified) {
+      updateData.coachVerificationData = {
+        coachName: dto.coachName,
+        confidenceScore: dto.confidenceScore,
+        verificationReasons: dto.verificationReasons,
+        verifiedAt: new Date(),
+      };
+    } else {
+      // Si la vérification est retirée, effacer les données
+      updateData.coachVerificationData = null;
+    }
+
+    const updatedUser = await this.userModel
+      .findByIdAndUpdate(userId, { $set: updateData }, { new: true })
+      .select('-password')
+      .exec();
+
+    if (!updatedUser) {
+      throw new NotFoundException('User not found');
+    }
+
+    return updatedUser;
   }
 }
 
