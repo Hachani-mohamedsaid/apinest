@@ -2,6 +2,8 @@ import { Controller, Post, Body, UseGuards, Request, Get, Query } from '@nestjs/
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { AICoachService } from './ai-coach.service';
+import { ActivitiesService } from '../activities/activities.service';
+import { UsersService } from '../users/users.service';
 import { AICoachSuggestionsRequestDto } from './dto/suggestions-request.dto';
 import { AICoachSuggestionsResponseDto } from './dto/suggestions-response.dto';
 import { PersonalizedTipsRequestDto } from './dto/personalized-tips-request.dto';
@@ -14,13 +16,17 @@ import { YouTubeVideosResponseDto } from './dto/youtube-videos-response.dto';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class AICoachController {
-  constructor(private readonly aiCoachService: AICoachService) {}
+  constructor(
+    private readonly aiCoachService: AICoachService,
+    private readonly activitiesService: ActivitiesService,
+    private readonly usersService: UsersService,
+  ) {}
 
   @Post('suggestions')
   @ApiOperation({
     summary: 'Get personalized activity suggestions and tips',
     description:
-      'Uses Google Gemini AI to generate personalized activity suggestions and tips based on Strava data and user profile',
+      'Uses ChatGPT (or Gemini as fallback) to generate personalized activity suggestions and tips based on Strava data, user profile, and activity history',
   })
   @ApiResponse({
     status: 200,
@@ -39,8 +45,35 @@ export class AICoachController {
     @Request() req,
     @Body() request: AICoachSuggestionsRequestDto,
   ): Promise<AICoachSuggestionsResponseDto> {
-    const userId = req.user._id.toString();
-    return this.aiCoachService.getPersonalizedSuggestions(userId, request);
+    const userId = req.user.sub || req.user._id?.toString();
+
+    // ✅ Récupérer les données de l'application
+    const createdActivities = await this.activitiesService.getActivitiesByCreator(userId);
+    const createdActivityIds = createdActivities.map((a) => a._id.toString());
+
+    // Récupérer les activités auxquelles l'utilisateur a participé
+    const allActivities = await this.activitiesService.findAll('public', userId);
+    const joinedActivities = allActivities.filter((a) =>
+      a.participantIds?.some((id) => id.toString() === userId),
+    );
+    const joinedActivityIds = joinedActivities.map((a) => a._id.toString());
+
+    // Récupérer le profil utilisateur pour la localisation
+    const userProfile = await this.usersService.findById(userId);
+
+    // ✅ Construire la requête enrichie
+    const enrichedRequest: AICoachSuggestionsRequestDto = {
+      ...request,
+      // Les données Strava sont envoyées par le frontend
+      // stravaData: request.stravaData, // Déjà dans la requête
+      recentAppActivities: request.recentAppActivities || [], // Peut être envoyé par le frontend
+      joinedActivities: request.joinedActivities || joinedActivityIds,
+      createdActivities: request.createdActivities || createdActivityIds,
+      location: request.location || userProfile?.location || undefined,
+      preferredTimeOfDay: request.preferredTimeOfDay || undefined,
+    };
+
+    return this.aiCoachService.getPersonalizedSuggestions(userId, enrichedRequest);
   }
 
   /**

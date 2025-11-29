@@ -108,33 +108,356 @@ export class AICoachService {
     try {
       // Récupérer les activités disponibles
       const activities = await this.activityModel
-        .find({ visibility: 'public' })
-        .limit(20)
+        .find({ visibility: 'public', isCompleted: { $ne: true } })
+        .limit(50)
         .populate('creator', 'name email profileImageUrl')
         .exec();
 
       // ✅ NOUVEAU : Récupérer les données utilisateur complètes
       const user = await this.userModel.findById(userId).exec();
-      const userActivities = await this.activityModel
+      
+      // Récupérer les activités créées par l'utilisateur
+      const createdActivities = await this.activityModel
         .find({ creator: userId })
         .sort({ createdAt: -1 })
         .limit(10)
         .exec();
+      
+      // Récupérer les activités auxquelles l'utilisateur a participé
+      const joinedActivities = await this.activityModel
+        .find({ participantIds: userId })
+        .sort({ createdAt: -1 })
+        .limit(10)
+        .exec();
 
-      if (!this.geminiApiKey || this.geminiApiKey === '' || !this.genAI) {
-        // Mode fallback si Gemini n'est pas configuré
+      // ✅ Prioriser ChatGPT si disponible, sinon utiliser Gemini, sinon fallback
+      if (this.openai && this.openaiApiKey) {
+        this.logger.log('🤖 Using ChatGPT for AI suggestions');
+        return await this.generateActivitySuggestionsWithChatGPT(
+          request,
+          activities,
+          user,
+          createdActivities,
+          joinedActivities,
+        );
+      } else if (this.geminiApiKey && this.genAI) {
+        this.logger.log('🤖 Using Gemini for AI suggestions (ChatGPT not available)');
+        const userActivities = [...createdActivities, ...joinedActivities];
+        return await this.generateActivitySuggestionsWithGemini(
+          request,
+          activities,
+          user,
+          userActivities,
+        );
+      } else {
+        // Mode fallback si ni ChatGPT ni Gemini ne sont configurés
         this.logger.warn('Using fallback mode for AI Coach suggestions');
         return this.generateFallbackSuggestions(request, activities);
       }
+    } catch (error) {
+      this.logger.error('❌ Error in AI Coach Gemini:', error);
+      this.logger.error('Error details:', error.message);
+      if (error.stack) {
+        this.logger.error('Stack trace:', error.stack);
+      }
 
-      // ✅ Construire un contexte enrichi avec toutes les données
-      const context = this.buildRichContext(request, user, userActivities, activities);
+      // En cas d'erreur, utiliser le fallback
+      this.logger.warn('⚠️ Using fallback mode due to error');
+      const activities = await this.activityModel
+        .find({ visibility: 'public' })
+        .limit(20)
+        .exec();
 
-      // Appeler Gemini API via REST (plus de contrôle sur la version de l'API)
-      // Note: Le SDK peut avoir des problèmes avec certains modèles
-      // Utiliser l'API REST directement pour plus de flexibilité
-      
-      const prompt = `Tu es un coach sportif IA personnalisé. Voici les données complètes de l'utilisateur:
+      return this.generateFallbackSuggestions(request, activities);
+      }
+    }
+
+  /**
+   * Génère des suggestions d'activités personnalisées avec ChatGPT
+   */
+  private async generateActivitySuggestionsWithChatGPT(
+    request: AICoachSuggestionsRequestDto,
+    availableActivities: any[],
+    user: any,
+    createdActivities: any[],
+    joinedActivities: any[],
+  ): Promise<AICoachSuggestionsResponseDto> {
+    try {
+      // Construire le prompt pour ChatGPT
+      const prompt = this.buildChatGPTSuggestionPrompt(
+        request,
+        availableActivities,
+        user,
+        createdActivities,
+        joinedActivities,
+      );
+
+      this.logger.log('🤖 Calling ChatGPT for activity suggestions...');
+
+      // Appeler ChatGPT
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-4o-mini', // Utiliser gpt-4o-mini pour réduire les coûts
+        messages: [
+          {
+            role: 'system',
+            content: `Tu es un coach sportif IA expert qui propose des activités personnalisées basées sur les données de l'utilisateur (Strava et historique de l'application). 
+            Analyse les données fournies et suggère les activités les plus pertinentes avec un score de correspondance (match score) de 0 à 100.`,
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        temperature: 0.7,
+        max_tokens: 2000,
+      });
+
+      const aiResponse = completion.choices[0]?.message?.content;
+      if (!aiResponse) {
+        throw new Error('No response from ChatGPT');
+      }
+
+      this.logger.log(`✅ ChatGPT response received (${aiResponse.length} characters)`);
+
+      // Parser la réponse de ChatGPT
+      const parsedResponse = this.parseChatGPTResponse(aiResponse, availableActivities);
+
+      // Générer les conseils personnalisés
+      const personalizedTips = await this.generatePersonalizedTips({
+        workouts: request.workouts,
+        calories: request.calories,
+        minutes: request.minutes,
+        streak: request.streak,
+        sportPreferences: request.sportPreferences
+          ? request.sportPreferences.split(',').map((s) => s.trim())
+          : undefined,
+        recentActivities: request.recentAppActivities,
+        stravaData: request.stravaData ? JSON.stringify(request.stravaData) : undefined,
+      });
+
+      return {
+        suggestions: parsedResponse.suggestions,
+        personalizedTips: personalizedTips.tips,
+      };
+    } catch (error) {
+      this.logger.error('Error generating AI suggestions with ChatGPT', error);
+      // Fallback vers Gemini ou fallback simple
+      if (this.geminiApiKey && this.genAI) {
+        this.logger.log('Falling back to Gemini...');
+        const userActivities = [...createdActivities, ...joinedActivities];
+        return await this.generateActivitySuggestionsWithGemini(
+          request,
+          availableActivities,
+          user,
+          userActivities,
+        );
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Construit le prompt pour ChatGPT
+   */
+  private buildChatGPTSuggestionPrompt(
+    request: AICoachSuggestionsRequestDto,
+    availableActivities: any[],
+    user: any,
+    createdActivities: any[],
+    joinedActivities: any[],
+  ): string {
+    let prompt = `Analyse les données suivantes de l'utilisateur et suggère les activités les plus pertinentes :
+
+## Données de l'utilisateur :
+
+### Statistiques hebdomadaires :
+- Workouts : ${request.workouts}
+- Calories brûlées : ${request.calories}
+- Minutes d'activité : ${request.minutes}
+- Série actuelle : ${request.streak} jours
+
+### Préférences sportives :
+${request.sportPreferences || 'Aucune préférence spécifique'}
+
+`;
+
+    // Ajouter données Strava si disponibles
+    if (request.stravaData) {
+      prompt += `### Données Strava :
+- Activités récentes : ${request.stravaData.recentActivities?.length || 0}
+- Sports favoris : ${request.stravaData.favoriteSports?.join(', ') || 'N/A'}
+- Tendance de performance : ${request.stravaData.performanceTrend || 'N/A'}
+
+Détails des activités récentes :
+${
+  request.stravaData.recentActivities
+    ?.slice(0, 5)
+    .map(
+      (act) =>
+        `- ${act.type}: ${(act.distance / 1000).toFixed(2)}km, ${(act.duration / 60).toFixed(0)}min, ${new Date(act.date).toLocaleDateString()}`,
+    )
+    .join('\n') || 'Aucune activité récente'
+}
+
+`;
+    }
+
+    // Ajouter données de l'application
+    if (request.recentAppActivities?.length || request.joinedActivities?.length || request.createdActivities?.length) {
+      prompt += `### Historique dans l'application :
+- Activités récentes consultées : ${request.recentAppActivities?.length || 0}
+- Activités rejointes : ${request.joinedActivities?.length || 0}
+- Activités créées : ${request.createdActivities?.length || 0}
+
+`;
+    }
+
+    // Ajouter localisation
+    if (request.location || user?.location) {
+      prompt += `### Localisation : ${request.location || user.location}\n\n`;
+    }
+
+    // Ajouter préférence d'horaire
+    if (request.preferredTimeOfDay) {
+      prompt += `### Horaire préféré : ${request.preferredTimeOfDay}\n\n`;
+    }
+
+    // Ajouter les activités disponibles
+    prompt += `## Activités disponibles dans l'application :
+
+${availableActivities.slice(0, 20).map(
+  (act, index) => {
+    const dateStr =
+      act.date instanceof Date
+        ? act.date.toLocaleDateString('fr-FR')
+        : String(act.date);
+    const timeStr =
+      act.time instanceof Date
+        ? act.time.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+        : String(act.time);
+    const participantCount = act.participantIds?.length || 0;
+    const maxParticipants = act.participants || 10;
+    
+    return `${index + 1}. **${act.title}**
+   - Sport : ${act.sportType}
+   - Lieu : ${act.location}
+   - Date : ${dateStr} à ${timeStr}
+   - Participants : ${participantCount}/${maxParticipants}
+   - Niveau : ${act.level}
+   - Prix : ${act.price > 0 ? `$${act.price}` : 'Gratuit'}
+   - ID : ${act._id}
+`;
+  },
+).join('\n')}
+
+## Instructions :
+
+1. Analyse les données de l'utilisateur (Strava + application)
+2. Identifie les activités les plus pertinentes parmi celles disponibles
+3. Pour chaque activité suggérée, calcule un score de correspondance (0-100) basé sur :
+   - Correspondance avec les sports favoris
+   - Correspondance avec l'historique Strava
+   - Correspondance avec les activités précédemment rejointes
+   - Correspondance avec le niveau de l'utilisateur
+   - Correspondance avec la localisation
+   - Correspondance avec l'horaire préféré
+4. Retourne un JSON avec le format suivant :
+
+\`\`\`json
+{
+  "suggestions": [
+    {
+      "activityId": "id_de_l_activite",
+      "matchScore": 85,
+      "reason": "Explication courte de pourquoi cette activité est recommandée"
+    }
+  ]
+}
+\`\`\`
+
+Suggère entre 3 et 5 activités maximum, triées par score de correspondance décroissant.`;
+
+    return prompt;
+  }
+
+  /**
+   * Parse la réponse de ChatGPT et enrichit avec les données des activités
+   */
+  private parseChatGPTResponse(aiResponse: string, availableActivities: any[]): {
+    suggestions: SuggestedActivityDto[];
+  } {
+    try {
+      // Extraire le JSON de la réponse
+      const jsonMatch =
+        aiResponse.match(/```json\s*([\s\S]*?)\s*```/) ||
+        aiResponse.match(/\{[\s\S]*\}/);
+
+      if (!jsonMatch) {
+        this.logger.warn('No JSON found in ChatGPT response');
+        return { suggestions: [] };
+      }
+
+      const parsed = JSON.parse(jsonMatch[1] || jsonMatch[0]);
+      const suggestions = parsed.suggestions || [];
+
+      // Enrichir avec les données complètes des activités
+      const enrichedSuggestions = suggestions
+        .map((suggestion: any) => {
+          const activity = availableActivities.find(
+            (a) => a._id.toString() === suggestion.activityId,
+          );
+          if (!activity) return null;
+
+          const dateStr =
+            activity.date instanceof Date
+              ? activity.date.toLocaleDateString('fr-FR')
+              : String(activity.date);
+          const timeStr =
+            activity.time instanceof Date
+              ? activity.time.toLocaleTimeString('fr-FR', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })
+              : String(activity.time);
+          const participantCount = activity.participantIds?.length || 0;
+          const maxParticipants = activity.participants || 10;
+
+          return {
+            id: activity._id.toString(),
+            title: activity.title,
+            sportType: activity.sportType,
+            location: activity.location,
+            date: dateStr,
+            time: timeStr,
+            participants: participantCount,
+            maxParticipants: maxParticipants,
+            level: activity.level,
+            matchScore: suggestion.matchScore || 0,
+            reason: suggestion.reason || '',
+          } as SuggestedActivityDto;
+        })
+        .filter(Boolean) as SuggestedActivityDto[];
+
+      return { suggestions: enrichedSuggestions };
+    } catch (error) {
+      this.logger.error('Error parsing ChatGPT response', error);
+      return { suggestions: [] };
+    }
+  }
+
+  /**
+   * Génère des suggestions avec Gemini (méthode existante, renommée)
+   */
+  private async generateActivitySuggestionsWithGemini(
+    request: AICoachSuggestionsRequestDto,
+    activities: any[],
+    user: any,
+    userActivities: any[],
+  ): Promise<AICoachSuggestionsResponseDto> {
+    // Utiliser la logique Gemini existante
+    const context = this.buildRichContext(request, user, userActivities, activities);
+
+    const prompt = `Tu es un coach sportif IA personnalisé. Voici les données complètes de l'utilisateur:
 
 ${context}
 
@@ -181,102 +504,23 @@ IMPORTANT:
 - Les catégories possibles: training, nutrition, recovery, motivation, health
 - Les icônes doivent être des emojis pertinents`;
 
-      this.logger.log('🤖 Calling Gemini API for personalized suggestions and tips...');
-      
-      // Essayer d'abord avec le SDK
-      let text: string;
-      try {
-        // Utiliser le modèle détecté, ou essayer gemini-pro par défaut
-        const modelName = this.availableModel || 'gemini-pro';
-        const model = this.genAI.getGenerativeModel({ model: modelName });
-        const result = await model.generateContent(prompt);
-        const response = await result.response;
-        text = response.text();
-      } catch (sdkError: any) {
-        // Si le SDK échoue, essayer avec l'API REST directement
-        this.logger.warn('SDK failed, trying REST API directly...');
-        
-        // Essayer différents modèles et versions d'API
-        const apiVersions = ['v1', 'v1beta'];
-        const modelNames = ['gemini-pro', 'gemini-1.5-flash', 'gemini-1.5-pro'];
-        let restSuccess = false;
-        
-        for (const apiVersion of apiVersions) {
-          for (const modelName of modelNames) {
-            try {
-              this.logger.debug(`Trying REST API: ${apiVersion}/models/${modelName}`);
-              const restResponse = await axios.post(
-                `https://generativelanguage.googleapis.com/${apiVersion}/models/${modelName}:generateContent?key=${this.geminiApiKey}`,
-                {
-                  contents: [{
-                    parts: [{
-                      text: prompt
-                    }]
-                  }]
-                },
-                {
-                  headers: {
-                    'Content-Type': 'application/json'
-                  },
-                  timeout: 30000
-                }
-              );
-              
-              if (restResponse.data?.candidates?.[0]?.content?.parts?.[0]?.text) {
-                text = restResponse.data.candidates[0].content.parts[0].text;
-                this.logger.log(`✅ Successfully called Gemini via REST API (${apiVersion}/${modelName})`);
-                restSuccess = true;
-                break;
-              }
-            } catch (restError: any) {
-              // Continuer avec le prochain modèle/version
-              this.logger.debug(`REST API failed for ${apiVersion}/${modelName}: ${restError.response?.status || restError.message}`);
-              continue;
-            }
-          }
-          if (restSuccess) break;
-        }
-        
-        if (!restSuccess) {
-          // Si tous les modèles/versions échouent, lancer l'erreur pour utiliser le fallback
-          this.logger.error('All Gemini API attempts failed, using fallback');
-          throw new Error('No available Gemini model found');
-        }
-      }
+    this.logger.log('🤖 Calling Gemini API for personalized suggestions and tips...');
 
-      this.logger.log(`✅ Gemini API response received (${text.length} characters)`);
-      this.logger.debug(`Gemini response preview: ${text.substring(0, 300)}...`);
-
-      // ✅ Parser la réponse JSON complète
-      const parsedResponse = this.parseGeminiJSONResponse(text, activities, request);
-
-      // Vérifier si on a des conseils générés par Gemini (pas fallback)
-      if (parsedResponse.personalizedTips && parsedResponse.personalizedTips.length > 0) {
-        const firstTipId = parsedResponse.personalizedTips[0].id;
-        if (!firstTipId.startsWith('default-tip-')) {
-          this.logger.log(`✅ Gemini generated ${parsedResponse.personalizedTips.length} personalized tips`);
-        } else {
-          this.logger.warn('⚠️ Parsed response contains default tips - falling back');
-        }
-      }
-
-      return parsedResponse;
-    } catch (error) {
-      this.logger.error('❌ Error in AI Coach Gemini:', error);
-      this.logger.error('Error details:', error.message);
-      if (error.stack) {
-        this.logger.error('Stack trace:', error.stack);
-      }
-
-      // En cas d'erreur, utiliser le fallback
-      this.logger.warn('⚠️ Using fallback mode due to error');
-      const activities = await this.activityModel
-        .find({ visibility: 'public' })
-        .limit(20)
-        .exec();
-
-      return this.generateFallbackSuggestions(request, activities);
+    let text: string;
+    try {
+      const modelName = this.availableModel || 'gemini-pro';
+      const model = this.genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      text = response.text();
+    } catch (sdkError: any) {
+      this.logger.warn('SDK failed, trying REST API directly...');
+      throw sdkError; // Si Gemini échoue aussi, laisser l'erreur remonter
     }
+
+    this.logger.log(`✅ Gemini API response received (${text.length} characters)`);
+    const parsedResponse = this.parseGeminiJSONResponse(text, activities, request);
+    return parsedResponse;
   }
 
   // ✅ NOUVEAU : Construire un contexte enrichi avec toutes les données

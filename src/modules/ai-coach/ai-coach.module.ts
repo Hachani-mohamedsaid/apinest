@@ -4,6 +4,8 @@ import { AICoachController } from './ai-coach.controller';
 import { AICoachService } from './ai-coach.service';
 import { Activity, ActivitySchema } from '../activities/schemas/activity.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
+import { ActivitiesModule } from '../activities/activities.module';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
@@ -11,6 +13,8 @@ import { User, UserSchema } from '../users/schemas/user.schema';
       { name: Activity.name, schema: ActivitySchema },
       { name: User.name, schema: UserSchema },
     ]),
+    ActivitiesModule,
+    UsersModule,
   ],
   controllers: [AICoachController],
   providers: [AICoachService],
