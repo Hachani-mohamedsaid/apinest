@@ -8,6 +8,7 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { StripeService } from '../stripe/stripe.service';
 import { Activity, ActivityDocument } from '../activities/schemas/activity.schema';
+import { Payment, PaymentDocument } from './schemas/payment.schema';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 
@@ -17,6 +18,7 @@ export class PaymentsService {
 
   constructor(
     @InjectModel(Activity.name) private activityModel: Model<ActivityDocument>,
+    @InjectModel(Payment.name) private paymentModel: Model<PaymentDocument>,
     private stripeService: StripeService,
   ) {}
 
@@ -142,6 +144,57 @@ export class PaymentsService {
     activity.participantIds.push(userIdObject);
     await activity.save();
 
+    // Récupérer le Payment Intent depuis Stripe pour obtenir les détails
+    let paymentIntentDetails;
+    try {
+      paymentIntentDetails = await this.stripeService.retrievePaymentIntent(
+        dto.paymentIntentId,
+      );
+    } catch (error) {
+      this.logger.warn(
+        `Could not retrieve payment intent details: ${error.message}`,
+      );
+    }
+
+    // Enregistrer le paiement dans MongoDB
+    const coachId = activity.creator.toString();
+    const amount = paymentIntentDetails?.amount || Math.round(activity.price * 100); // Montant en cents
+    const currency = paymentIntentDetails?.currency || 'eur';
+
+    try {
+      // Vérifier si le paiement n'existe pas déjà (éviter les doublons)
+      const existingPayment = await this.paymentModel
+        .findOne({ paymentIntentId: dto.paymentIntentId })
+        .exec();
+
+      if (!existingPayment) {
+        const payment = new this.paymentModel({
+          activityId: new Types.ObjectId(dto.activityId),
+          userId: new Types.ObjectId(userId),
+          coachId: new Types.ObjectId(coachId),
+          amount: amount,
+          currency: currency,
+          paymentIntentId: dto.paymentIntentId,
+          status: 'succeeded',
+        });
+
+        await payment.save();
+        this.logger.log(
+          `Payment saved to database: ${payment._id} for activity ${dto.activityId}`,
+        );
+      } else {
+        this.logger.log(
+          `Payment already exists in database: ${existingPayment._id}`,
+        );
+      }
+    } catch (error) {
+      // Log l'erreur mais ne bloque pas le processus si l'enregistrement échoue
+      this.logger.error(
+        `Error saving payment to database: ${error.message}`,
+        error.stack,
+      );
+    }
+
     this.logger.log(
       `Payment confirmed and user ${userId} added as participant to activity ${dto.activityId}`,
     );
@@ -180,7 +233,7 @@ export class PaymentsService {
 
   /**
    * Récupérer les earnings (revenus) d'un coach
-   * Calcule les revenus à partir des activités payantes avec participants
+   * Utilise les paiements stockés dans MongoDB (priorité) ou calcule depuis les activités (fallback)
    */
   async getCoachEarnings(
     coachId: string,
@@ -195,14 +248,125 @@ export class PaymentsService {
       activityTitle: string;
     }>;
   }> {
-    // Construire la query pour les activités du coach
-    const query: any = {
-      creator: new Types.ObjectId(coachId),
-      price: { $exists: true, $gt: 0 }, // Seulement les activités payantes
-      participantIds: { $exists: true, $ne: [] }, // Avec au moins un participant
+    // Construire la query pour les paiements du coach
+    const paymentQuery: any = {
+      coachId: new Types.ObjectId(coachId),
+      status: 'succeeded', // Seulement les paiements réussis
     };
 
     // Filtrer par date si fourni
+    if (year && month) {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59);
+      paymentQuery.createdAt = {
+        $gte: startDate,
+        $lte: endDate,
+      };
+    } else if (year) {
+      const startDate = new Date(year, 0, 1);
+      const endDate = new Date(year, 11, 31, 23, 59, 59);
+      paymentQuery.createdAt = {
+        $gte: startDate,
+        $lte: endDate,
+      };
+    }
+
+    // Récupérer les paiements depuis MongoDB
+    const payments = await this.paymentModel
+      .find(paymentQuery)
+      .populate('activityId', 'title date')
+      .sort({ createdAt: -1 })
+      .exec();
+
+    // Si des paiements existent, les utiliser
+    if (payments && payments.length > 0) {
+      const earningsMap = new Map<string, {
+        date: string;
+        amount: number;
+        activityId: string;
+        activityTitle: string;
+      }>();
+
+      let totalEarnings = 0;
+
+      for (const payment of payments) {
+        const paymentObj = payment.toObject ? payment.toObject() : payment;
+        const createdAt = (paymentObj as any).createdAt || new Date();
+        const dateStr = createdAt instanceof Date
+          ? createdAt.toISOString().split('T')[0]
+          : new Date(createdAt).toISOString().split('T')[0];
+
+        // Convertir le montant de cents en unité de devise
+        const amountInCurrency = payment.amount / 100;
+
+        // Grouper par date et activité (clé: date_activityId)
+        const activityIdStr = payment.activityId.toString();
+        const key = `${dateStr}_${activityIdStr}`;
+        const existing = earningsMap.get(key);
+
+        if (existing) {
+          existing.amount += amountInCurrency;
+        } else {
+          // Récupérer le titre de l'activité depuis le populate ou depuis la base
+          let activityTitle = 'Unknown Activity';
+          const activity = payment.activityId as any;
+          
+          // Si l'activité est populée (objet), utiliser directement
+          if (activity && typeof activity === 'object' && 'title' in activity) {
+            activityTitle = activity.title || 'Unknown Activity';
+          } else {
+            // Sinon, récupérer depuis la base de données
+            try {
+              const activityDoc = await this.activityModel.findById(activityIdStr).exec();
+              if (activityDoc) {
+                activityTitle = activityDoc.title;
+              }
+            } catch (error) {
+              this.logger.warn(`Could not fetch activity title for ${activityIdStr}: ${error.message}`);
+            }
+          }
+
+          earningsMap.set(key, {
+            date: dateStr,
+            amount: amountInCurrency,
+            activityId: activityIdStr,
+            activityTitle: activityTitle,
+          });
+        }
+
+        totalEarnings += amountInCurrency;
+      }
+
+      // Convertir en format de réponse
+      const earnings = Array.from(earningsMap.values()).map((item) => ({
+        date: item.date,
+        amount: Math.round(item.amount * 100) / 100,
+        activityId: item.activityId,
+        activityTitle: item.activityTitle,
+      }));
+
+      // Trier par date (plus récentes en premier)
+      earnings.sort(
+        (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+      );
+
+      return {
+        totalEarnings: Math.round(totalEarnings * 100) / 100,
+        earnings,
+      };
+    }
+
+    // Fallback: Calculer depuis les activités si aucun paiement n'est trouvé
+    this.logger.log(
+      `No payments found in database for coach ${coachId}, falling back to activity-based calculation`,
+    );
+
+    const query: any = {
+      creator: new Types.ObjectId(coachId),
+      price: { $exists: true, $gt: 0 },
+      participantIds: { $exists: true, $ne: [] },
+    };
+
     if (year && month) {
       const startDate = new Date(year, month - 1, 1);
       const endDate = new Date(year, month, 0, 23, 59, 59);
@@ -219,10 +383,8 @@ export class PaymentsService {
       };
     }
 
-    // Récupérer les activités du coach avec participants
     const activities = await this.activityModel.find(query).exec();
 
-    // Calculer les earnings - une entrée par activité avec participants
     const earnings: Array<{
       date: string;
       amount: number;
@@ -236,7 +398,6 @@ export class PaymentsService {
         continue;
       }
 
-      // Calculer le nombre de participants (revenus = prix × nombre de participants)
       const participantCount = activity.participantIds?.length || 0;
       if (participantCount === 0) {
         continue;
@@ -245,7 +406,6 @@ export class PaymentsService {
       const earningsAmount = activity.price * participantCount;
       totalEarnings += earningsAmount;
 
-      // Utiliser la date de création de l'activité ou la date de l'activité
       const activityObj = activity.toObject ? activity.toObject() : activity;
       const activityDate = activity.date || (activityObj as any).createdAt || new Date();
       const dateStr = activityDate instanceof Date
@@ -254,13 +414,12 @@ export class PaymentsService {
 
       earnings.push({
         date: dateStr,
-        amount: Math.round(earningsAmount * 100) / 100, // Arrondir à 2 décimales
+        amount: Math.round(earningsAmount * 100) / 100,
         activityId: activity._id.toString(),
         activityTitle: activity.title,
       });
     }
 
-    // Trier par date (plus récentes en premier)
     earnings.sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
     );
