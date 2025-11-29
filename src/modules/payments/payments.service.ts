@@ -177,5 +177,97 @@ export class PaymentsService {
       activityPrice: activity.price || 0,
     };
   }
+
+  /**
+   * Récupérer les earnings (revenus) d'un coach
+   * Calcule les revenus à partir des activités payantes avec participants
+   */
+  async getCoachEarnings(
+    coachId: string,
+    year?: number,
+    month?: number,
+  ): Promise<{
+    totalEarnings: number;
+    earnings: Array<{
+      date: string;
+      amount: number;
+      activityId: string;
+      activityTitle: string;
+    }>;
+  }> {
+    // Construire la query pour les activités du coach
+    const query: any = {
+      creator: new Types.ObjectId(coachId),
+      price: { $exists: true, $gt: 0 }, // Seulement les activités payantes
+      participantIds: { $exists: true, $ne: [] }, // Avec au moins un participant
+    };
+
+    // Filtrer par date si fourni
+    if (year && month) {
+      const startDate = new Date(year, month - 1, 1);
+      const endDate = new Date(year, month, 0, 23, 59, 59);
+      query.createdAt = {
+        $gte: startDate,
+        $lte: endDate,
+      };
+    } else if (year) {
+      const startDate = new Date(year, 0, 1);
+      const endDate = new Date(year, 11, 31, 23, 59, 59);
+      query.createdAt = {
+        $gte: startDate,
+        $lte: endDate,
+      };
+    }
+
+    // Récupérer les activités du coach avec participants
+    const activities = await this.activityModel.find(query).exec();
+
+    // Calculer les earnings - une entrée par activité avec participants
+    const earnings: Array<{
+      date: string;
+      amount: number;
+      activityId: string;
+      activityTitle: string;
+    }> = [];
+    let totalEarnings = 0;
+
+    for (const activity of activities) {
+      if (!activity.price || activity.price <= 0) {
+        continue;
+      }
+
+      // Calculer le nombre de participants (revenus = prix × nombre de participants)
+      const participantCount = activity.participantIds?.length || 0;
+      if (participantCount === 0) {
+        continue;
+      }
+
+      const earningsAmount = activity.price * participantCount;
+      totalEarnings += earningsAmount;
+
+      // Utiliser la date de création de l'activité ou la date de l'activité
+      const activityDate = activity.date || activity.createdAt || new Date();
+      const dateStr = activityDate instanceof Date
+        ? activityDate.toISOString().split('T')[0]
+        : new Date(activityDate).toISOString().split('T')[0];
+
+      earnings.push({
+        date: dateStr,
+        amount: Math.round(earningsAmount * 100) / 100, // Arrondir à 2 décimales
+        activityId: activity._id.toString(),
+        activityTitle: activity.title,
+      });
+    }
+
+    // Trier par date (plus récentes en premier)
+    earnings.sort(
+      (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+    );
+
+    return {
+      totalEarnings: Math.round(totalEarnings * 100) / 100,
+      earnings,
+    };
+  }
 }
 

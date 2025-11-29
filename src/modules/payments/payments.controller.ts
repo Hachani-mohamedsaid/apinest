@@ -6,8 +6,9 @@ import {
   Param,
   UseGuards,
   Request,
+  Query,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PaymentsService } from './payments.service';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
@@ -65,6 +66,41 @@ export class PaymentsController {
   async checkPayment(@Param('activityId') activityId: string, @Request() req) {
     const userId = req.user.sub;
     return this.paymentsService.checkPayment(activityId, userId);
+  }
+
+  /**
+   * GET /payments/coach/earnings
+   * Récupère les earnings (revenus) du coach pour une période donnée
+   */
+  @Get('coach/earnings')
+  @ApiOperation({
+    summary: 'Get coach earnings',
+    description: 'Retrieves earnings (revenue) for the authenticated coach for a given period',
+  })
+  @ApiQuery({
+    name: 'year',
+    required: false,
+    type: Number,
+    description: 'Year (e.g., 2025)',
+  })
+  @ApiQuery({
+    name: 'month',
+    required: false,
+    type: Number,
+    description: 'Month (1-12)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Coach earnings retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getCoachEarnings(
+    @Request() req,
+    @Query('year') year?: number,
+    @Query('month') month?: number,
+  ) {
+    const coachId = req.user.sub;
+    return this.paymentsService.getCoachEarnings(coachId, year, month);
   }
 }
 

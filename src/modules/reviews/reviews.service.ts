@@ -122,6 +122,114 @@ export class ReviewsService {
   }
 
   /**
+   * Récupérer les reviews pour plusieurs activités
+   */
+  async getReviewsByActivityIds(
+    activityIds: string[],
+    limit: number = 50,
+  ): Promise<ReviewDocument[]> {
+    if (!activityIds || activityIds.length === 0) {
+      return [];
+    }
+
+    const objectIds = activityIds
+      .filter((id) => Types.ObjectId.isValid(id))
+      .map((id) => new Types.ObjectId(id));
+
+    if (objectIds.length === 0) {
+      return [];
+    }
+
+    return this.reviewModel
+      .find({ activityId: { $in: objectIds } })
+      .populate('userId', 'name profileImageUrl')
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .exec();
+  }
+
+  /**
+   * Récupérer les reviews reçus par un coach
+   */
+  async getCoachReviews(
+    coachId: string,
+    limit: number = 50,
+  ): Promise<{
+    reviews: Array<{
+      _id: string;
+      id: string;
+      activityId: string;
+      activityTitle: string;
+      userId: string;
+      userName: string;
+      userAvatar: string | null;
+      rating: number;
+      comment: string | null;
+      createdAt: Date;
+    }>;
+    averageRating: number;
+    totalReviews: number;
+  }> {
+    this.validateObjectId(coachId);
+
+    // Récupérer toutes les activités créées par ce coach
+    const coachActivities = await this.activityModel
+      .find({ creator: new Types.ObjectId(coachId) })
+      .exec();
+
+    if (coachActivities.length === 0) {
+      return {
+        reviews: [],
+        averageRating: 0,
+        totalReviews: 0,
+      };
+    }
+
+    const activityIds = coachActivities.map((a) => a._id.toString());
+
+    // Récupérer les reviews pour ces activités
+    const reviews = await this.getReviewsByActivityIds(activityIds, limit);
+
+    // Créer un map pour accéder rapidement aux activités
+    const activitiesMap = new Map();
+    coachActivities.forEach((activity) => {
+      activitiesMap.set(activity._id.toString(), activity);
+    });
+
+    // Enrichir avec les informations de l'activité et de l'utilisateur
+    const enrichedReviews = reviews.map((review) => {
+      const activity = activitiesMap.get(review.activityId.toString());
+      const user = (review.userId as any)?.toObject
+        ? (review.userId as any).toObject()
+        : review.userId;
+
+      return {
+        _id: review._id.toString(),
+        id: review._id.toString(),
+        activityId: review.activityId.toString(),
+        activityTitle: activity?.title || null,
+        userId: review.userId.toString(),
+        userName: user?.name || 'Unknown',
+        userAvatar: user?.profileImageUrl || null,
+        rating: review.rating,
+        comment: review.comment || null,
+        createdAt: review.createdAt,
+      };
+    });
+
+    // Calculer la moyenne
+    const totalRating = reviews.reduce((sum, r) => sum + r.rating, 0);
+    const averageRating =
+      reviews.length > 0 ? totalRating / reviews.length : 0;
+
+    return {
+      reviews: enrichedReviews,
+      averageRating: Math.round(averageRating * 10) / 10, // Arrondir à 1 décimale
+      totalReviews: reviews.length,
+    };
+  }
+
+  /**
    * Valide qu'un ID est un ObjectId MongoDB valide
    */
   private validateObjectId(id: string): void {

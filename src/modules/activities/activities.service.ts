@@ -883,6 +883,16 @@ export class ActivitiesService {
     return { message: 'Activity marked as complete' };
   }
 
+  /**
+   * Récupérer toutes les activités créées par un utilisateur
+   */
+  async getActivitiesByCreator(creatorId: string): Promise<ActivityDocument[]> {
+    this.validateObjectId(creatorId);
+    return this.activityModel
+      .find({ creator: new Types.ObjectId(creatorId) })
+      .exec();
+  }
+
   async isUserParticipant(activityId: string, userId: string): Promise<boolean> {
     this.validateObjectId(activityId);
     

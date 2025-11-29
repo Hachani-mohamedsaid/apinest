@@ -6,8 +6,9 @@ import {
   Param,
   UseGuards,
   Request,
+  Query,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { ReviewsService } from './reviews.service';
 import { CreateReviewDto } from './dto/create-review.dto';
@@ -63,6 +64,31 @@ export class ReviewsController {
   async getActivityReviews(@Param('activityId') activityId: string) {
     const result = await this.reviewsService.getActivityReviews(activityId);
     return result;
+  }
+
+  /**
+   * GET /reviews/coach
+   * Récupère les reviews reçus par le coach
+   */
+  @Get('coach')
+  @ApiOperation({
+    summary: 'Get coach reviews',
+    description: 'Retrieves all reviews received by the authenticated coach',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Maximum number of reviews to return (default: 50)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Coach reviews retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getCoachReviews(@Request() req, @Query('limit') limit?: number) {
+    const coachId = req.user.sub;
+    return this.reviewsService.getCoachReviews(coachId, limit || 50);
   }
 }
 
