@@ -56,47 +56,54 @@ export class ActivitiesCronService {
             `[ActivitiesCronService] Activity ${activity._id} (${activity.title}) marked as completed`,
           );
 
-          // Envoyer des notifications de review à tous les participants (sauf le créateur)
-          const participants = activity.participantIds || [];
-          const creatorId = activity.creator.toString();
-          const participantsToNotify = participants.filter(
-            (p: any) => p.toString() !== creatorId,
-          );
-
-          if (participantsToNotify.length === 0) {
-            this.logger.debug(
-              `[ActivitiesCronService] No participants to notify for activity ${activity._id}`,
+          // Envoyer des notifications de review UNIQUEMENT pour les activités coach (avec price > 0)
+          // Les activités individuelles (gratuites) ne nécessitent pas de review
+          if (activity.price && activity.price > 0) {
+            const participants = activity.participantIds || [];
+            const creatorId = activity.creator.toString();
+            const participantsToNotify = participants.filter(
+              (p: any) => p.toString() !== creatorId,
             );
-            continue;
-          }
 
-          this.logger.log(
-            `[ActivitiesCronService] Sending review notifications to ${participantsToNotify.length} participants for activity ${activity._id}`,
-          );
-
-          // Créer les notifications pour chaque participant
-          for (const participantId of participantsToNotify) {
-            try {
-              await this.notificationService.createNotification(
-                participantId.toString(),
-                NotificationType.ACTIVITY_REVIEW_REQUEST,
-                'Rate Your Session',
-                `How was your last coach session "${activity.title}"? Tap to leave a rating and review.`,
-                {
-                  activityId: activity._id.toString(),
-                  activityName: activity.title,
-                  activityTitle: activity.title,
-                },
-              );
+            if (participantsToNotify.length === 0) {
               this.logger.debug(
-                `[ActivitiesCronService] Review notification sent to participant ${participantId} for activity ${activity._id}`,
+                `[ActivitiesCronService] No participants to notify for activity ${activity._id}`,
               );
-            } catch (error) {
-              this.logger.error(
-                `[ActivitiesCronService] Error sending review notification to participant ${participantId} for activity ${activity._id}: ${error.message}`,
-              );
-              // Continuer avec les autres participants même si une notification échoue
+              continue;
             }
+
+            this.logger.log(
+              `[ActivitiesCronService] Sending review notifications to ${participantsToNotify.length} participants for coach session (price: ${activity.price}) activity ${activity._id}`,
+            );
+
+            // Créer les notifications pour chaque participant
+            for (const participantId of participantsToNotify) {
+              try {
+                await this.notificationService.createNotification(
+                  participantId.toString(),
+                  NotificationType.ACTIVITY_REVIEW_REQUEST,
+                  'Rate Your Session',
+                  `How was your last coach session "${activity.title}"? Tap to leave a rating and review.`,
+                  {
+                    activityId: activity._id.toString(),
+                    activityName: activity.title,
+                    activityTitle: activity.title,
+                  },
+                );
+                this.logger.debug(
+                  `[ActivitiesCronService] Review notification sent to participant ${participantId} for activity ${activity._id}`,
+                );
+              } catch (error) {
+                this.logger.error(
+                  `[ActivitiesCronService] Error sending review notification to participant ${participantId} for activity ${activity._id}: ${error.message}`,
+                );
+                // Continuer avec les autres participants même si une notification échoue
+              }
+            }
+          } else {
+            this.logger.debug(
+              `[ActivitiesCronService] Activity ${activity._id} is free (no price), skipping review notifications`,
+            );
           }
         } catch (error) {
           this.logger.error(

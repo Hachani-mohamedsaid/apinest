@@ -712,39 +712,48 @@ export class ActivitiesService {
     
     this.logger.log(`[ActivitiesService] Activity marked as completed in database`);
 
-    // Envoyer des notifications de review à tous les participants (sauf le créateur)
+    // Récupérer tous les participants (utilisé pour les notifications ET les activity logs)
     const participants = activity.participantIds || [];
-    const participantsToNotify = participants.filter(
-      (p: any) => p.toString() !== userId,
-    );
 
-    this.logger.log(
-      `[ActivitiesService] Sending review notifications to ${participantsToNotify.length} participants`,
-    );
+    // Envoyer des notifications de review UNIQUEMENT pour les activités coach (avec price > 0)
+    // Les activités individuelles (gratuites) ne nécessitent pas de review
+    if (activity.price && activity.price > 0) {
+      const participantsToNotify = participants.filter(
+        (p: any) => p.toString() !== userId,
+      );
 
-    // Créer les notifications pour chaque participant
-    for (const participantId of participantsToNotify) {
-      try {
-        await this.notificationService.createNotification(
-          participantId.toString(),
-          NotificationType.ACTIVITY_REVIEW_REQUEST,
-          'Rate Your Session',
-          `How was your last coach session "${activity.title}"? Tap to leave a rating and review.`,
-          {
-            activityId: activityId,
-            activityName: activity.title,
-            activityTitle: activity.title,
-          },
-        );
-        this.logger.log(
-          `[ActivitiesService] Review notification sent to participant ${participantId}`,
-        );
-      } catch (error) {
-        this.logger.error(
-          `[ActivitiesService] Error sending review notification to participant ${participantId}: ${error.message}`,
-        );
-        // Ne pas bloquer la complétion de l'activité si l'envoi de notification échoue
+      this.logger.log(
+        `[ActivitiesService] Sending review notifications to ${participantsToNotify.length} participants for coach session (price: ${activity.price})`,
+      );
+
+      // Créer les notifications pour chaque participant
+      for (const participantId of participantsToNotify) {
+        try {
+          await this.notificationService.createNotification(
+            participantId.toString(),
+            NotificationType.ACTIVITY_REVIEW_REQUEST,
+            'Rate Your Session',
+            `How was your last coach session "${activity.title}"? Tap to leave a rating and review.`,
+            {
+              activityId: activityId,
+              activityName: activity.title,
+              activityTitle: activity.title,
+            },
+          );
+          this.logger.log(
+            `[ActivitiesService] Review notification sent to participant ${participantId}`,
+          );
+        } catch (error) {
+          this.logger.error(
+            `[ActivitiesService] Error sending review notification to participant ${participantId}: ${error.message}`,
+          );
+          // Ne pas bloquer la complétion de l'activité si l'envoi de notification échoue
+        }
       }
+    } else {
+      this.logger.log(
+        `[ActivitiesService] Activity is free (no price), skipping review notifications`,
+      );
     }
 
     // Create activity log for all participants
