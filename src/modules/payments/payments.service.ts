@@ -274,9 +274,12 @@ export class PaymentsService {
     // Récupérer les paiements depuis MongoDB
     const payments = await this.paymentModel
       .find(paymentQuery)
-      .populate('activityId', 'title date')
       .sort({ createdAt: -1 })
       .exec();
+
+    this.logger.log(
+      `Found ${payments.length} payments for coach ${coachId} (year: ${year || 'all'}, month: ${month || 'all'})`,
+    );
 
     // Si des paiements existent, les utiliser
     if (payments && payments.length > 0) {
@@ -307,23 +310,17 @@ export class PaymentsService {
         if (existing) {
           existing.amount += amountInCurrency;
         } else {
-          // Récupérer le titre de l'activité depuis le populate ou depuis la base
+          // Récupérer le titre de l'activité depuis la base de données
           let activityTitle = 'Unknown Activity';
-          const activity = payment.activityId as any;
-          
-          // Si l'activité est populée (objet), utiliser directement
-          if (activity && typeof activity === 'object' && 'title' in activity) {
-            activityTitle = activity.title || 'Unknown Activity';
-          } else {
-            // Sinon, récupérer depuis la base de données
-            try {
-              const activityDoc = await this.activityModel.findById(activityIdStr).exec();
-              if (activityDoc) {
-                activityTitle = activityDoc.title;
-              }
-            } catch (error) {
-              this.logger.warn(`Could not fetch activity title for ${activityIdStr}: ${error.message}`);
+          try {
+            const activityDoc = await this.activityModel.findById(activityIdStr).exec();
+            if (activityDoc) {
+              activityTitle = activityDoc.title;
+            } else {
+              this.logger.warn(`Activity not found for payment: ${activityIdStr}`);
             }
+          } catch (error) {
+            this.logger.warn(`Could not fetch activity title for ${activityIdStr}: ${error.message}`);
           }
 
           earningsMap.set(key, {
@@ -367,23 +364,32 @@ export class PaymentsService {
       participantIds: { $exists: true, $ne: [] },
     };
 
+    // Filtrer par date si fourni (utiliser la date de l'activité, pas createdAt)
     if (year && month) {
       const startDate = new Date(year, month - 1, 1);
       const endDate = new Date(year, month, 0, 23, 59, 59);
-      query.createdAt = {
+      query.date = {
         $gte: startDate,
         $lte: endDate,
       };
     } else if (year) {
       const startDate = new Date(year, 0, 1);
       const endDate = new Date(year, 11, 31, 23, 59, 59);
-      query.createdAt = {
+      query.date = {
         $gte: startDate,
         $lte: endDate,
       };
     }
 
+    this.logger.log(
+      `Fallback query: ${JSON.stringify(query)}`,
+    );
+
     const activities = await this.activityModel.find(query).exec();
+
+    this.logger.log(
+      `Found ${activities.length} activities with participants for coach ${coachId}`,
+    );
 
     const earnings: Array<{
       date: string;
@@ -406,8 +412,8 @@ export class PaymentsService {
       const earningsAmount = activity.price * participantCount;
       totalEarnings += earningsAmount;
 
-      const activityObj = activity.toObject ? activity.toObject() : activity;
-      const activityDate = activity.date || (activityObj as any).createdAt || new Date();
+      // Utiliser la date de l'activité (date) plutôt que createdAt
+      const activityDate = activity.date || new Date();
       const dateStr = activityDate instanceof Date
         ? activityDate.toISOString().split('T')[0]
         : new Date(activityDate).toISOString().split('T')[0];
@@ -422,6 +428,10 @@ export class PaymentsService {
 
     earnings.sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime(),
+    );
+
+    this.logger.log(
+      `Fallback calculation: ${earnings.length} earnings entries, total: ${totalEarnings}`,
     );
 
     return {

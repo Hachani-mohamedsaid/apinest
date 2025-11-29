@@ -172,12 +172,17 @@ export class ReviewsService {
   }> {
     this.validateObjectId(coachId);
 
+    this.logger.log(`Fetching reviews for coach: ${coachId}`);
+
     // Récupérer toutes les activités créées par ce coach
     const coachActivities = await this.activityModel
       .find({ creator: new Types.ObjectId(coachId) })
       .exec();
 
+    this.logger.log(`Found ${coachActivities.length} activities for coach ${coachId}`);
+
     if (coachActivities.length === 0) {
+      this.logger.log(`No activities found for coach ${coachId}, returning empty reviews`);
       return {
         reviews: [],
         averageRating: 0,
@@ -186,9 +191,12 @@ export class ReviewsService {
     }
 
     const activityIds = coachActivities.map((a) => a._id.toString());
+    this.logger.log(`Looking for reviews for ${activityIds.length} activities: ${activityIds.join(', ')}`);
 
     // Récupérer les reviews pour ces activités
     const reviews = await this.getReviewsByActivityIds(activityIds, limit);
+
+    this.logger.log(`Found ${reviews.length} reviews for coach ${coachId}`);
 
     // Créer un map pour accéder rapidement aux activités
     const activitiesMap = new Map();
@@ -199,9 +207,23 @@ export class ReviewsService {
     // Enrichir avec les informations de l'activité et de l'utilisateur
     const enrichedReviews = reviews.map((review) => {
       const activity = activitiesMap.get(review.activityId.toString());
-      const user = (review.userId as any)?.toObject
-        ? (review.userId as any).toObject()
-        : review.userId;
+      
+      // Gérer le populate de userId
+      let userName = 'Unknown';
+      let userAvatar: string | null = null;
+      
+      if (review.userId) {
+        // Si userId est populé (objet avec toObject)
+        if (typeof review.userId === 'object' && 'toObject' in review.userId) {
+          const userObj = (review.userId as any).toObject();
+          userName = userObj?.name || 'Unknown';
+          userAvatar = userObj?.profileImageUrl || null;
+        } else if (typeof review.userId === 'object' && 'name' in review.userId) {
+          // Si userId est déjà un objet avec name
+          userName = (review.userId as any).name || 'Unknown';
+          userAvatar = (review.userId as any).profileImageUrl || null;
+        }
+      }
       
       const reviewObj = review.toObject ? review.toObject() : review;
       const createdAt = (reviewObj as any).createdAt || new Date();
@@ -210,10 +232,18 @@ export class ReviewsService {
         _id: review._id.toString(),
         id: review._id.toString(),
         activityId: review.activityId.toString(),
-        activityTitle: activity?.title || null,
-        userId: review.userId.toString(),
-        userName: user?.name || 'Unknown',
-        userAvatar: user?.profileImageUrl || null,
+        activityTitle: activity?.title || 'Unknown Activity',
+        userId: (() => {
+          if (typeof review.userId === 'object' && review.userId !== null && '_id' in review.userId) {
+            return (review.userId as any)._id.toString();
+          } else if (typeof review.userId === 'object' && review.userId !== null) {
+            return String(review.userId);
+          } else {
+            return review.userId.toString();
+          }
+        })(),
+        userName: userName,
+        userAvatar: userAvatar,
         rating: review.rating,
         comment: review.comment || null,
         createdAt: createdAt,
@@ -224,6 +254,10 @@ export class ReviewsService {
     const totalRating = reviews.reduce((sum, r) => sum + r.rating, 0);
     const averageRating =
       reviews.length > 0 ? totalRating / reviews.length : 0;
+
+    this.logger.log(
+      `Returning ${enrichedReviews.length} reviews with average rating ${averageRating} for coach ${coachId}`,
+    );
 
     return {
       reviews: enrichedReviews,
