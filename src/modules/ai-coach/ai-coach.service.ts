@@ -1,6 +1,7 @@
 import { Injectable, HttpException, HttpStatus, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { GoogleGenerativeAI } from '@google/generative-ai';
+import OpenAI from 'openai';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import axios from 'axios';
@@ -8,12 +9,19 @@ import { Activity, ActivityDocument } from '../activities/schemas/activity.schem
 import { User, UserDocument } from '../users/schemas/user.schema';
 import { AICoachSuggestionsRequestDto } from './dto/suggestions-request.dto';
 import { AICoachSuggestionsResponseDto, SuggestedActivityDto, PersonalizedTipDto } from './dto/suggestions-response.dto';
+import { PersonalizedTipsRequestDto } from './dto/personalized-tips-request.dto';
+import { PersonalizedTipsResponseDto } from './dto/personalized-tips-response.dto';
+import { YouTubeVideosRequestDto } from './dto/youtube-videos-request.dto';
+import { YouTubeVideosResponseDto, YouTubeVideoDto } from './dto/youtube-videos-response.dto';
 
 @Injectable()
 export class AICoachService {
   private readonly logger = new Logger(AICoachService.name);
   private readonly geminiApiKey: string;
+  private readonly openaiApiKey: string;
+  private readonly youtubeApiKey: string;
   private genAI: GoogleGenerativeAI | null = null;
+  private openai: OpenAI | null = null;
   private availableModel: string | null = null; // Modèle disponible détecté
 
   constructor(
@@ -21,6 +29,7 @@ export class AICoachService {
     @InjectModel(Activity.name) private activityModel: Model<ActivityDocument>,
     @InjectModel(User.name) private userModel: Model<UserDocument>,
   ) {
+    // Configuration Gemini
     this.geminiApiKey = this.configService.get<string>('GEMINI_API_KEY') || '';
 
     if (!this.geminiApiKey) {
@@ -40,6 +49,27 @@ export class AICoachService {
       } catch (error) {
         this.logger.error('❌ Error initializing Google Gemini AI:', error);
       }
+    }
+
+    // Configuration OpenAI (ChatGPT)
+    this.openaiApiKey = this.configService.get<string>('OPENAI_API_KEY') || '';
+    if (!this.openaiApiKey) {
+      this.logger.warn('⚠️ OPENAI_API_KEY not configured. ChatGPT personalized tips will use fallback mode.');
+    } else {
+      try {
+        this.openai = new OpenAI({ apiKey: this.openaiApiKey });
+        this.logger.log('✅ OpenAI (ChatGPT) initialized successfully');
+      } catch (error) {
+        this.logger.error('❌ Error initializing OpenAI:', error);
+      }
+    }
+
+    // Configuration YouTube
+    this.youtubeApiKey = this.configService.get<string>('YOUTUBE_API_KEY') || '';
+    if (!this.youtubeApiKey) {
+      this.logger.warn('⚠️ YOUTUBE_API_KEY not configured. YouTube videos will be unavailable.');
+    } else {
+      this.logger.log('✅ YouTube API key configured');
     }
   }
 
@@ -526,6 +556,251 @@ L'utilisateur a créé ${userActivities.length} activités récemment:`;
         priority: 'medium',
       },
     ];
+  }
+
+  /**
+   * Génère des conseils personnalisés avec ChatGPT
+   */
+  async generatePersonalizedTips(
+    request: PersonalizedTipsRequestDto,
+  ): Promise<PersonalizedTipsResponseDto> {
+    if (!this.openai) {
+      this.logger.warn('OpenAI not configured, returning default tips');
+      return this.getDefaultTips(request);
+    }
+
+    try {
+      const systemPrompt = `Tu es un coach sportif IA expert. Tu donnes des conseils personnalisés et motivants en français. 
+Réponds toujours en français avec des conseils pratiques et encourageants.`;
+
+      const userPrompt = this.buildUserPrompt(request);
+
+      const completion = await this.openai.chat.completions.create({
+        model: 'gpt-3.5-turbo',
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.7,
+        max_tokens: 1500,
+      });
+
+      const aiMessage = completion.choices[0]?.message?.content;
+      if (!aiMessage) {
+        this.logger.warn('OpenAI returned empty response');
+        return this.getDefaultTips(request);
+      }
+
+      // Parser la réponse JSON de ChatGPT
+      const tips = this.parseTipsFromAIResponse(aiMessage);
+      return { tips };
+    } catch (error) {
+      this.logger.error('Error generating personalized tips with OpenAI', error);
+      return this.getDefaultTips(request);
+    }
+  }
+
+  /**
+   * Récupère des vidéos YouTube pertinentes
+   */
+  async getYouTubeVideos(
+    request: YouTubeVideosRequestDto,
+  ): Promise<YouTubeVideosResponseDto> {
+    if (!this.youtubeApiKey) {
+      this.logger.warn('YouTube API key not configured');
+      return { videos: [] };
+    }
+
+    try {
+      const searchQuery = this.buildYouTubeSearchQuery(request.sportPreferences);
+      const maxResults = request.maxResults || 10;
+
+      const response = await axios.get('https://www.googleapis.com/youtube/v3/search', {
+        params: {
+          key: this.youtubeApiKey,
+          part: 'snippet',
+          q: searchQuery,
+          type: 'video',
+          maxResults,
+          videoCategoryId: '17', // Sports category
+          order: 'relevance',
+        },
+      });
+
+      const videos = response.data.items.map((item: any) => ({
+        id: item.id.videoId,
+        title: item.snippet.title,
+        description: item.snippet.description,
+        thumbnailUrl:
+          item.snippet.thumbnails.high?.url ||
+          item.snippet.thumbnails.medium?.url ||
+          item.snippet.thumbnails.default?.url ||
+          '',
+        channelTitle: item.snippet.channelTitle,
+        publishedAt: item.snippet.publishedAt,
+      }));
+
+      // Optionnel: Récupérer les détails supplémentaires (durée, vues)
+      if (videos.length > 0) {
+        const videoIds = videos.map((v: any) => v.id).join(',');
+        const detailsResponse = await axios.get(
+          'https://www.googleapis.com/youtube/v3/videos',
+          {
+            params: {
+              key: this.youtubeApiKey,
+              part: 'contentDetails,statistics',
+              id: videoIds,
+            },
+          },
+        );
+
+        const detailsMap = new Map();
+        detailsResponse.data.items.forEach((item: any) => {
+          detailsMap.set(item.id, {
+            duration: item.contentDetails?.duration,
+            viewCount: item.statistics?.viewCount,
+          });
+        });
+
+        videos.forEach((video: any) => {
+          const details = detailsMap.get(video.id);
+          if (details) {
+            video.duration = details.duration;
+            video.viewCount = details.viewCount;
+          }
+        });
+      }
+
+      return { videos };
+    } catch (error) {
+      this.logger.error('Error fetching YouTube videos', error);
+      return { videos: [] };
+    }
+  }
+
+  /**
+   * Construit le prompt utilisateur pour ChatGPT
+   */
+  private buildUserPrompt(request: PersonalizedTipsRequestDto): string {
+    let prompt = `Génère 3-5 conseils personnalisés pour améliorer mes performances sportives.\n\n`;
+
+    prompt += `Mes statistiques de la semaine:\n`;
+    prompt += `- Entraînements: ${request.workouts}\n`;
+    prompt += `- Calories brûlées: ${request.calories}\n`;
+    prompt += `- Minutes d'activité: ${request.minutes}\n`;
+    prompt += `- Série actuelle: ${request.streak} jours\n\n`;
+
+    if (request.stravaData) {
+      prompt += `Données Strava: ${request.stravaData}\n\n`;
+    }
+
+    if (request.sportPreferences && request.sportPreferences.length > 0) {
+      prompt += `Sports préférés: ${request.sportPreferences.join(', ')}\n\n`;
+    }
+
+    if (request.recentActivities && request.recentActivities.length > 0) {
+      prompt += `Activités récentes: ${request.recentActivities.join(', ')}\n\n`;
+    }
+
+    prompt += `Génère des conseils personnalisés, motivants et pratiques. `;
+    prompt += `Chaque conseil doit avoir:\n`;
+    prompt += `1. Un titre court et accrocheur\n`;
+    prompt += `2. Une description détaillée et pratique\n`;
+    prompt += `3. Une catégorie (motivation, training, recovery, nutrition, etc.)\n`;
+    prompt += `4. Un emoji approprié\n\n`;
+    prompt += `Réponds au format JSON avec un tableau de conseils, chaque conseil ayant: id, title, description, icon, category`;
+
+    return prompt;
+  }
+
+  /**
+   * Parse la réponse JSON de ChatGPT
+   */
+  private parseTipsFromAIResponse(aiMessage: string): PersonalizedTipDto[] {
+    try {
+      // Extraire le JSON de la réponse
+      const jsonStart = aiMessage.indexOf('[');
+      const jsonEnd = aiMessage.lastIndexOf(']') + 1;
+
+      if (jsonStart >= 0 && jsonEnd > jsonStart) {
+        const jsonString = aiMessage.substring(jsonStart, jsonEnd);
+        const tipsArray = JSON.parse(jsonString);
+
+        return tipsArray.map((tip: any, index: number) => ({
+          id: tip.id || `ai-tip-${Date.now()}-${index}`,
+          title: tip.title || 'Conseil personnalisé',
+          description: tip.description || '',
+          icon: tip.icon || '💡',
+          category: tip.category || 'general',
+          priority: tip.priority,
+        }));
+      }
+
+      // Si pas de JSON, créer un conseil à partir du texte
+      return [
+        {
+          id: `ai-tip-${Date.now()}`,
+          title: 'Conseil personnalisé',
+          description: aiMessage.substring(0, 200),
+          icon: '💡',
+          category: 'general',
+        },
+      ];
+    } catch (error) {
+      this.logger.error('Error parsing AI response', error);
+      return [];
+    }
+  }
+
+  /**
+   * Construit la requête de recherche YouTube
+   */
+  private buildYouTubeSearchQuery(sportPreferences?: string[]): string {
+    if (sportPreferences && sportPreferences.length > 0) {
+      const sports = sportPreferences.join(' OR ');
+      return `${sports} workout tutorial training`;
+    }
+    return 'fitness workout tutorial training';
+  }
+
+  /**
+   * Retourne des conseils par défaut pour ChatGPT
+   */
+  private getDefaultTips(
+    request: PersonalizedTipsRequestDto,
+  ): PersonalizedTipsResponseDto {
+    const tips: PersonalizedTipDto[] = [];
+
+    if (request.workouts < 5) {
+      tips.push({
+        id: 'default-1',
+        title: 'Maintenez votre série',
+        description: `Vous avez une série de ${request.streak} jour${request.streak > 1 ? 's' : ''} ! Continuez à vous entraîner régulièrement pour maintenir cette habitude.`,
+        icon: '🔥',
+        category: 'motivation',
+      });
+    }
+
+    if (request.workouts === 0) {
+      tips.push({
+        id: 'default-2',
+        title: 'Augmentez progressivement',
+        description: `Cette semaine, vous avez fait ${request.workouts} entraînement. Essayez d'en ajouter 1 ou 2 de plus la semaine prochaine.`,
+        icon: '📈',
+        category: 'training',
+      });
+    }
+
+    tips.push({
+      id: 'default-3',
+      title: 'Récupération active',
+      description:
+        "N'oubliez pas de prendre du temps pour récupérer entre les séances d'entraînement.",
+      icon: '🧘',
+      category: 'recovery',
+    });
+
+    return { tips };
   }
 }
 
