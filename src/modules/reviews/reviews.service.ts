@@ -202,6 +202,9 @@ export class ReviewsService {
       const user = (review.userId as any)?.toObject
         ? (review.userId as any).toObject()
         : review.userId;
+      
+      const reviewObj = review.toObject ? review.toObject() : review;
+      const createdAt = (reviewObj as any).createdAt || new Date();
 
       return {
         _id: review._id.toString(),
@@ -213,7 +216,7 @@ export class ReviewsService {
         userAvatar: user?.profileImageUrl || null,
         rating: review.rating,
         comment: review.comment || null,
-        createdAt: review.createdAt,
+        createdAt: createdAt,
       };
     });
 

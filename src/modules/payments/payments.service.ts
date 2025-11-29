@@ -246,7 +246,8 @@ export class PaymentsService {
       totalEarnings += earningsAmount;
 
       // Utiliser la date de création de l'activité ou la date de l'activité
-      const activityDate = activity.date || activity.createdAt || new Date();
+      const activityObj = activity.toObject ? activity.toObject() : activity;
+      const activityDate = activity.date || (activityObj as any).createdAt || new Date();
       const dateStr = activityDate instanceof Date
         ? activityDate.toISOString().split('T')[0]
         : new Date(activityDate).toISOString().split('T')[0];
