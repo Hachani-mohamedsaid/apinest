@@ -172,17 +172,58 @@ export class ReviewsService {
   }> {
     this.validateObjectId(coachId);
 
-    this.logger.log(`Fetching reviews for coach: ${coachId}`);
+    this.logger.log(`[getCoachReviews] Fetching reviews for coach: ${coachId}`);
 
     // Récupérer toutes les activités créées par ce coach
     const coachActivities = await this.activityModel
       .find({ creator: new Types.ObjectId(coachId) })
       .exec();
 
-    this.logger.log(`Found ${coachActivities.length} activities for coach ${coachId}`);
+    this.logger.log(
+      `[getCoachReviews] Found ${coachActivities.length} activities for coach ${coachId}`,
+    );
 
     if (coachActivities.length === 0) {
-      this.logger.log(`No activities found for coach ${coachId}, returning empty reviews`);
+      this.logger.warn(
+        `[getCoachReviews] No activities found for coach ${coachId}, returning empty reviews`,
+      );
+      
+      // Debug: Vérifier s'il y a des reviews dans la base
+      const allReviewsCount = await this.reviewModel.countDocuments({}).exec();
+      this.logger.log(
+        `[getCoachReviews] Total reviews in database: ${allReviewsCount}`,
+      );
+      
+      if (allReviewsCount > 0) {
+        // Récupérer quelques reviews pour voir leurs activityIds
+        const sampleReviews = await this.reviewModel
+          .find({})
+          .limit(5)
+          .select('activityId')
+          .exec();
+        const sampleActivityIds = sampleReviews.map((r) => r.activityId.toString());
+        this.logger.log(
+          `[getCoachReviews] Sample review activityIds: ${sampleActivityIds.join(', ')}`,
+        );
+        
+        // Vérifier qui a créé ces activités
+        for (const review of sampleReviews) {
+          const activity = await this.activityModel
+            .findById(review.activityId)
+            .select('creator title')
+            .exec();
+          if (activity) {
+            this.logger.log(
+              `[getCoachReviews] Activity ${review.activityId.toString()} created by ${activity.creator.toString()}, title: ${activity.title}`,
+            );
+          } else {
+            this.logger.warn(
+              `[getCoachReviews] Activity ${review.activityId.toString()} not found in database`,
+            );
+          }
+        }
+      }
+      
       return {
         reviews: [],
         averageRating: 0,
@@ -191,12 +232,16 @@ export class ReviewsService {
     }
 
     const activityIds = coachActivities.map((a) => a._id.toString());
-    this.logger.log(`Looking for reviews for ${activityIds.length} activities: ${activityIds.join(', ')}`);
+    this.logger.log(
+      `[getCoachReviews] Looking for reviews for ${activityIds.length} activities: ${activityIds.join(', ')}`,
+    );
 
     // Récupérer les reviews pour ces activités
     const reviews = await this.getReviewsByActivityIds(activityIds, limit);
 
-    this.logger.log(`Found ${reviews.length} reviews for coach ${coachId}`);
+    this.logger.log(
+      `[getCoachReviews] Found ${reviews.length} reviews for coach ${coachId}`,
+    );
 
     // Créer un map pour accéder rapidement aux activités
     const activitiesMap = new Map();
@@ -263,6 +308,87 @@ export class ReviewsService {
       reviews: enrichedReviews,
       averageRating: Math.round(averageRating * 10) / 10, // Arrondir à 1 décimale
       totalReviews: reviews.length,
+    };
+  }
+
+  /**
+   * Méthode de debug pour diagnostiquer les problèmes de reviews
+   */
+  async debugCoachReviews(coachId: string): Promise<any> {
+    this.validateObjectId(coachId);
+
+    this.logger.log(`[DEBUG] Starting debug for coach: ${coachId}`);
+
+    // 1. Récupérer toutes les activités créées par ce coach
+    const coachActivities = await this.activityModel
+      .find({ creator: new Types.ObjectId(coachId) })
+      .exec();
+
+    this.logger.log(`[DEBUG] Coach ${coachId} has ${coachActivities.length} activities`);
+
+    const coachActivityIds = coachActivities.map((a) => a._id.toString());
+
+    // 2. Récupérer TOUS les reviews dans la base (sans filtre)
+    const allReviews = await this.reviewModel.find({}).exec();
+
+    this.logger.log(`[DEBUG] Total reviews in database: ${allReviews.length}`);
+
+    const allReviewActivityIds = allReviews.map((r) => r.activityId.toString());
+
+    // 3. Vérifier quelles activités des reviews existent et qui les a créées
+    const reviewActivitiesInfo = await Promise.all(
+      allReviews.map(async (review) => {
+        const activityId = review.activityId.toString();
+        const activity = await this.activityModel.findById(activityId).exec();
+
+        return {
+          reviewId: review._id.toString(),
+          activityId: activityId,
+          activityExists: !!activity,
+          activityCreator: activity?.creator?.toString() || null,
+          activityTitle: activity?.title || null,
+          isCoachActivity: coachActivityIds.includes(activityId),
+        };
+      }),
+    );
+
+    // 4. Récupérer les reviews pour les activités du coach
+    const reviewsForCoach = await this.getReviewsByActivityIds(
+      coachActivityIds,
+      50,
+    );
+
+    this.logger.log(
+      `[DEBUG] Reviews for coach activities: ${reviewsForCoach.length}`,
+    );
+
+    return {
+      coachId,
+      coachActivitiesCount: coachActivities.length,
+      coachActivityIds: coachActivityIds,
+      coachActivities: coachActivities.map((a) => ({
+        id: a._id.toString(),
+        title: a.title,
+        creator: a.creator.toString(),
+      })),
+      allReviewsCount: allReviews.length,
+      allReviewActivityIds: allReviewActivityIds,
+      allReviews: allReviews.map((r) => ({
+        id: r._id.toString(),
+        activityId: r.activityId.toString(),
+        userId: r.userId.toString(),
+        rating: r.rating,
+        comment: r.comment,
+      })),
+      reviewActivitiesInfo: reviewActivitiesInfo,
+      reviewsForCoachCount: reviewsForCoach.length,
+      reviewsForCoach: reviewsForCoach.map((r) => ({
+        id: r._id.toString(),
+        activityId: r.activityId.toString(),
+        userId: r.userId.toString(),
+        rating: r.rating,
+        comment: r.comment,
+      })),
     };
   }
 

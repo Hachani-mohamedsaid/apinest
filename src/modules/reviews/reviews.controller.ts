@@ -90,5 +90,24 @@ export class ReviewsController {
     const coachId = req.user.sub;
     return this.reviewsService.getCoachReviews(coachId, limit || 50);
   }
+
+  /**
+   * GET /reviews/coach/debug
+   * Endpoint de debug pour diagnostiquer les problèmes de reviews
+   */
+  @Get('coach/debug')
+  @ApiOperation({
+    summary: 'Debug coach reviews',
+    description: 'Debug endpoint to diagnose why reviews are not showing for a coach',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Debug information retrieved successfully',
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async debugCoachReviews(@Request() req) {
+    const coachId = req.user.sub;
+    return this.reviewsService.debugCoachReviews(coachId);
+  }
 }
 
