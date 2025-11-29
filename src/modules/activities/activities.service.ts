@@ -15,6 +15,8 @@ import { XpService } from '../achievements/services/xp.service';
 import { StreakService } from '../achievements/services/streak.service';
 import { BadgeService } from '../achievements/services/badge.service';
 import { ChallengeService } from '../achievements/services/challenge.service';
+import { NotificationService } from '../achievements/services/notification.service';
+import { NotificationType } from '../achievements/schemas/notification.schema';
 import { ActivityLog, ActivityLogDocument } from '../achievements/schemas/activity-log.schema';
 import { Match, MatchDocument } from '../quick-match/schemas/match.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
@@ -32,6 +34,7 @@ export class ActivitiesService {
     private readonly streakService: StreakService,
     private readonly badgeService: BadgeService,
     private readonly challengeService: ChallengeService,
+    private readonly notificationService: NotificationService,
   ) {}
 
   /**
@@ -204,8 +207,10 @@ export class ActivitiesService {
     }
 
     // Pour "public" ou par défaut, retourner toutes les activités publiques
+    // Filtrer les activités terminées
     const query: any = {
       visibility: 'public',
+      isCompleted: { $ne: true }, // Exclure les activités terminées
     };
 
     return this.activityModel
@@ -254,10 +259,12 @@ export class ActivitiesService {
       );
 
       // 4. Récupérer les activités créées par ces utilisateurs avec visibility="friends"
+      // Filtrer les activités terminées
       const activities = await this.activityModel
         .find({
           creator: { $in: allowedUserIds },
           visibility: 'friends',
+          isCompleted: { $ne: true }, // Exclure les activités terminées
         })
         .populate('creator', 'name email profileImageUrl')
         .sort({ createdAt: -1 })
@@ -294,10 +301,11 @@ export class ActivitiesService {
     }
 
     // Pour "public" ou par défaut, retourner les sessions de coach publiques
+    // Filtrer les activités terminées
     const query: any = {
       visibility: 'public',
       price: { $exists: true, $gt: 0 },
-      isCompleted: false,
+      isCompleted: { $ne: true },
     };
 
     return this.activityModel
@@ -324,6 +332,7 @@ export class ActivitiesService {
     }
 
     // Pour "public" ou par défaut, retourner les activités individuelles publiques
+    // Filtrer les activités terminées
     const query: any = {
       visibility: 'public',
       $or: [
@@ -331,7 +340,7 @@ export class ActivitiesService {
         { price: null },
         { price: 0 },
       ],
-      isCompleted: false,
+      isCompleted: { $ne: true },
     };
 
     return this.activityModel
@@ -372,12 +381,13 @@ export class ActivitiesService {
       ];
 
       // 4. Récupérer les sessions de coach créées par ces utilisateurs avec visibility="friends"
+      // Filtrer les activités terminées
       const activities = await this.activityModel
         .find({
           creator: { $in: allowedUserIds },
           visibility: 'friends',
           price: { $exists: true, $gt: 0 },
-          isCompleted: false,
+          isCompleted: { $ne: true },
         })
         .populate('creator', 'name email profileImageUrl')
         .sort({ createdAt: -1 })
@@ -424,6 +434,7 @@ export class ActivitiesService {
       ];
 
       // 4. Récupérer les activités individuelles créées par ces utilisateurs avec visibility="friends"
+      // Filtrer les activités terminées
       const activities = await this.activityModel
         .find({
           creator: { $in: allowedUserIds },
@@ -433,7 +444,7 @@ export class ActivitiesService {
             { price: null },
             { price: 0 },
           ],
-          isCompleted: false,
+          isCompleted: { $ne: true },
         })
         .populate('creator', 'name email profileImageUrl')
         .sort({ createdAt: -1 })
@@ -701,8 +712,43 @@ export class ActivitiesService {
     
     this.logger.log(`[ActivitiesService] Activity marked as completed in database`);
 
-    // Create activity log for all participants
+    // Envoyer des notifications de review à tous les participants (sauf le créateur)
     const participants = activity.participantIds || [];
+    const participantsToNotify = participants.filter(
+      (p: any) => p.toString() !== userId,
+    );
+
+    this.logger.log(
+      `[ActivitiesService] Sending review notifications to ${participantsToNotify.length} participants`,
+    );
+
+    // Créer les notifications pour chaque participant
+    for (const participantId of participantsToNotify) {
+      try {
+        await this.notificationService.createNotification(
+          participantId.toString(),
+          NotificationType.ACTIVITY_REVIEW_REQUEST,
+          'Rate Your Session',
+          `How was your last coach session "${activity.title}"? Tap to leave a rating and review.`,
+          {
+            activityId: activityId,
+            activityName: activity.title,
+            activityTitle: activity.title,
+          },
+        );
+        this.logger.log(
+          `[ActivitiesService] Review notification sent to participant ${participantId}`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[ActivitiesService] Error sending review notification to participant ${participantId}: ${error.message}`,
+        );
+        // Ne pas bloquer la complétion de l'activité si l'envoi de notification échoue
+      }
+    }
+
+    // Create activity log for all participants
+    // Réutiliser la variable participants déjà déclarée
     const activityDate = activity.date || activity.time || new Date();
     const defaultDuration = durationMinutes || 30; // Durée par défaut de 30 minutes si non fournie
     const defaultDistance = distanceKm || 0;

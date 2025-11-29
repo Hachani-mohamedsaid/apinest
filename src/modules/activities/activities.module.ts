@@ -4,6 +4,7 @@ import { JwtModule } from '@nestjs/jwt';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { ActivitiesController } from './activities.controller';
 import { ActivitiesService } from './activities.service';
+import { ActivitiesCronService } from './activities-cron.service';
 import { ActivityMessagesService } from './activity-messages.service';
 import { ActivityRoomGateway } from './activity-room.gateway';
 import { Activity, ActivitySchema } from './schemas/activity.schema';
@@ -38,6 +39,7 @@ import { AchievementsModule } from '../achievements/achievements.module';
   controllers: [ActivitiesController],
   providers: [
     ActivitiesService,
+    ActivitiesCronService,
     ActivityMessagesService,
     ActivityRoomGateway,
   ],

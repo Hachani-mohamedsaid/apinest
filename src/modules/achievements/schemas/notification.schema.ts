@@ -11,6 +11,7 @@ export enum NotificationType {
   STREAK_UPDATED = 'streak_updated',
   LIKE_RECEIVED = 'like_received',
   MATCH_MADE = 'match_made',
+  ACTIVITY_REVIEW_REQUEST = 'activity_review_request',
 }
 
 @Schema({ timestamps: true })

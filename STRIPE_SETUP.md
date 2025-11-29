@@ -218,6 +218,171 @@ curl -X GET https://apinest-production.up.railway.app/payments/check-payment/act
 2. **Transactions** : Les opérations de paiement et d'ajout de participant devraient être dans une transaction MongoDB pour garantir la cohérence
 3. **Logs** : Tous les paiements sont loggés pour le débogage et l'audit
 
+## 🧪 Tester avec un Compte Stripe de Test
+
+### 1. Obtenir les Clés de Test
+
+1. Connectez-vous à votre compte Stripe : https://dashboard.stripe.com
+2. Assurez-vous d'être en mode **Test** (basculez en haut à droite du dashboard)
+3. Allez dans **Developers** > **API keys**
+4. Copiez la **Secret key** (commence par `sk_test_...`)
+5. Copiez la **Publishable key** (commence par `pk_test_...`)
+
+### 2. Configurer les Clés de Test
+
+Dans votre `.env` ou Railway, ajoutez :
+
+```env
+STRIPE_SECRET_KEY=sk_test_51... # Votre clé secrète de test
+```
+
+### 3. Cartes de Test Stripe
+
+Utilisez ces cartes pour tester différents scénarios :
+
+#### ✅ Paiement Réussi
+
+```
+Numéro de carte : 4242 4242 4242 4242
+Date d'expiration : N'importe quelle date future (ex: 12/25)
+CVC : N'importe quel code à 3 chiffres (ex: 123)
+Code postal : N'importe quel code postal (ex: 12345)
+```
+
+#### ❌ Paiement Refusé
+
+```
+Numéro de carte : 4000 0000 0000 0002
+Date d'expiration : N'importe quelle date future
+CVC : N'importe quel code à 3 chiffres
+```
+
+#### ⚠️ Carte Requiert une Authentification (3D Secure)
+
+```
+Numéro de carte : 4000 0025 0000 3155
+Date d'expiration : N'importe quelle date future
+CVC : N'importe quel code à 3 chiffres
+```
+
+#### 💳 Autres Cartes de Test Utiles
+
+- **Carte avec fonds insuffisants** : `4000 0000 0000 9995`
+- **Carte expirée** : `4000 0000 0000 0069`
+- **Carte invalide** : `4000 0000 0000 0002`
+
+### 4. Tester les Endpoints API
+
+#### Test 1 : Créer un Payment Intent
+
+```bash
+curl -X POST https://apinest-production.up.railway.app/payments/create-intent \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "activityId": "VOTRE_ACTIVITY_ID",
+    "amount": 25.00,
+    "currency": "eur"
+  }'
+```
+
+**Réponse attendue :**
+```json
+{
+  "clientSecret": "pi_xxx_secret_xxx",
+  "paymentIntentId": "pi_xxx"
+}
+```
+
+#### Test 2 : Vérifier le Statut de Paiement
+
+```bash
+curl -X GET https://apinest-production.up.railway.app/payments/check-payment/VOTRE_ACTIVITY_ID \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+### 5. Tester avec Stripe Dashboard
+
+1. Allez dans **Payments** > **Test payments** dans votre dashboard Stripe
+2. Vous verrez tous les paiements de test effectués
+3. Vous pouvez voir les détails de chaque paiement, y compris le statut
+
+### 6. Tester avec Stripe CLI (Optionnel)
+
+Si vous avez installé Stripe CLI :
+
+```bash
+# Installer Stripe CLI
+# Windows: https://github.com/stripe/stripe-cli/releases
+# Mac: brew install stripe/stripe-cli/stripe
+# Linux: voir documentation Stripe
+
+# Se connecter
+stripe login
+
+# Écouter les événements en temps réel
+stripe listen --forward-to localhost:3000/payments/webhook
+
+# Déclencher un événement de test
+stripe trigger payment_intent.succeeded
+```
+
+### 7. Vérifier les Logs
+
+Dans votre console NestJS, vous devriez voir :
+
+```
+✅ Stripe configured successfully
+[PaymentsService] Payment intent created: pi_xxx for activity xxx by user xxx
+[PaymentsService] Payment confirmed and user xxx added as participant to activity xxx
+```
+
+### 8. Scénarios de Test Complets
+
+#### Scénario 1 : Paiement Réussi
+
+1. Créer une activité avec un prix (ex: 25€)
+2. Créer un Payment Intent via `POST /payments/create-intent`
+3. Utiliser la carte `4242 4242 4242 4242` dans le frontend
+4. Confirmer le paiement via `POST /payments/confirm`
+5. Vérifier que l'utilisateur est ajouté comme participant
+
+#### Scénario 2 : Paiement Refusé
+
+1. Créer un Payment Intent
+2. Utiliser la carte `4000 0000 0000 0002` dans le frontend
+3. Le paiement devrait échouer
+4. Vérifier que l'utilisateur n'est PAS ajouté comme participant
+
+#### Scénario 3 : Activité Gratuite
+
+1. Créer une activité SANS prix
+2. Essayer de créer un Payment Intent
+3. Devrait retourner une erreur : "Activity is free, no payment required"
+
+#### Scénario 4 : Activité Pleine
+
+1. Créer une activité avec 1 participant maximum
+2. Ajouter un participant
+3. Essayer d'ajouter un autre participant
+4. Devrait retourner une erreur : "Activity is full"
+
+### 9. Mode Test vs Production
+
+**Mode Test :**
+- Clés commencent par `sk_test_` et `pk_test_`
+- Utilisez les cartes de test ci-dessus
+- Les paiements ne sont pas réels
+- Parfait pour le développement
+
+**Mode Production :**
+- Clés commencent par `sk_live_` et `pk_live_`
+- Utilisez de vraies cartes (attention !)
+- Les paiements sont réels
+- Utilisez uniquement en production
+
+**⚠️ Important :** Ne mélangez JAMAIS les clés de test et de production !
+
 ## 🚀 Déploiement
 
 1. Utilisez les clés de **production** Stripe en production

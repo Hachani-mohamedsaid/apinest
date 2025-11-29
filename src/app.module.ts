@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { MongooseModule } from '@nestjs/mongoose';
+import { ScheduleModule } from '@nestjs/schedule';
 import { AuthModule } from './modules/auth/auth.module';
 import { UsersModule } from './modules/users/users.module';
 import { MailModule } from './modules/mail/mail.module';
@@ -14,10 +15,12 @@ import { StravaModule } from './modules/strava/strava.module';
 import { CoachVerificationModule } from './modules/coach-verification/coach-verification.module';
 import { FilesModule } from './modules/files/files.module';
 import { PaymentsModule } from './modules/payments/payments.module';
+import { ReviewsModule } from './modules/reviews/reviews.module';
 import { HealthController } from './health.controller';
 
 @Module({
   imports: [
+    ScheduleModule.forRoot(), // Activer les tâches cron
     ConfigModule.forRoot({
       isGlobal: true,
       envFilePath: '.env',
@@ -53,6 +56,7 @@ import { HealthController } from './health.controller';
     CoachVerificationModule,
     FilesModule,
     PaymentsModule,
+    ReviewsModule,
   ],
   controllers: [HealthController],
 })
