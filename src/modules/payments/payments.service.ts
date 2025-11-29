@@ -157,9 +157,18 @@ export class PaymentsService {
     }
 
     // Enregistrer le paiement dans MongoDB
-    const coachId = activity.creator.toString();
+    let coachId: string;
+    if (typeof activity.creator === 'object' && activity.creator !== null) {
+      coachId = activity.creator._id ? activity.creator._id.toString() : activity.creator.toString();
+    } else {
+      coachId = activity.creator.toString();
+    }
     const amount = paymentIntentDetails?.amount || Math.round(activity.price * 100); // Montant en cents
     const currency = paymentIntentDetails?.currency || 'eur';
+
+    this.logger.log(
+      `[confirmPayment] Saving payment: activityId=${dto.activityId}, userId=${userId}, coachId=${coachId}, amount=${amount} cents`,
+    );
 
     try {
       // Vérifier si le paiement n'existe pas déjà (éviter les doublons)
@@ -180,17 +189,17 @@ export class PaymentsService {
 
         await payment.save();
         this.logger.log(
-          `Payment saved to database: ${payment._id} for activity ${dto.activityId}`,
+          `[confirmPayment] Payment saved: ${payment._id}, amount: ${payment.amount} cents (${payment.amount / 100} ${currency})`,
         );
       } else {
         this.logger.log(
-          `Payment already exists in database: ${existingPayment._id}`,
+          `[confirmPayment] Payment already exists: ${existingPayment._id}`,
         );
       }
     } catch (error) {
       // Log l'erreur mais ne bloque pas le processus si l'enregistrement échoue
       this.logger.error(
-        `Error saving payment to database: ${error.message}`,
+        `[confirmPayment] Error saving payment to database: ${error.message}`,
         error.stack,
       );
     }
@@ -229,6 +238,18 @@ export class PaymentsService {
       isParticipant,
       activityPrice: activity.price || 0,
     };
+  }
+
+  /**
+   * Récupérer les paiements selon une query
+   */
+  async getPaymentsByQuery(query: any): Promise<PaymentDocument[]> {
+    this.logger.log(
+      `[getPaymentsByQuery] Getting payments with query: ${JSON.stringify(query)}`,
+    );
+    const payments = await this.paymentModel.find(query).exec();
+    this.logger.log(`[getPaymentsByQuery] Found ${payments.length} payments`);
+    return payments;
   }
 
   /**
@@ -272,13 +293,10 @@ export class PaymentsService {
     }
 
     // Récupérer les paiements depuis MongoDB
-    const payments = await this.paymentModel
-      .find(paymentQuery)
-      .sort({ createdAt: -1 })
-      .exec();
+    const payments = await this.getPaymentsByQuery(paymentQuery);
 
     this.logger.log(
-      `Found ${payments.length} payments for coach ${coachId} (year: ${year || 'all'}, month: ${month || 'all'})`,
+      `[getCoachEarnings] Found ${payments.length} payments for coach ${coachId} (year: ${year || 'all'}, month: ${month || 'all'})`,
     );
 
     // Si des paiements existent, les utiliser
@@ -355,7 +373,7 @@ export class PaymentsService {
 
     // Fallback: Calculer depuis les activités si aucun paiement n'est trouvé
     this.logger.log(
-      `No payments found in database for coach ${coachId}, falling back to activity-based calculation`,
+      `[getCoachEarnings] No payments found in database for coach ${coachId}, falling back to activity-based calculation`,
     );
 
     const query: any = {
@@ -382,13 +400,13 @@ export class PaymentsService {
     }
 
     this.logger.log(
-      `Fallback query: ${JSON.stringify(query)}`,
+      `[getCoachEarnings] Fallback query: ${JSON.stringify(query)}`,
     );
 
     const activities = await this.activityModel.find(query).exec();
 
     this.logger.log(
-      `Found ${activities.length} activities with participants for coach ${coachId}`,
+      `[getCoachEarnings] Found ${activities.length} activities with participants for coach ${coachId}`,
     );
 
     const earnings: Array<{
@@ -431,7 +449,7 @@ export class PaymentsService {
     );
 
     this.logger.log(
-      `Fallback calculation: ${earnings.length} earnings entries, total: ${totalEarnings}`,
+      `[getCoachEarnings] Fallback calculation: ${earnings.length} earnings entries, total: ${totalEarnings}`,
     );
 
     return {

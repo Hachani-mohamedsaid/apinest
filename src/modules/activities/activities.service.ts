@@ -888,9 +888,30 @@ export class ActivitiesService {
    */
   async getActivitiesByCreator(creatorId: string): Promise<ActivityDocument[]> {
     this.validateObjectId(creatorId);
-    return this.activityModel
+    this.logger.log(`[getActivitiesByCreator] Getting activities for creator: ${creatorId}`);
+    
+    const activities = await this.activityModel
       .find({ creator: new Types.ObjectId(creatorId) })
       .exec();
+    
+    this.logger.log(`[getActivitiesByCreator] Found ${activities.length} activities for creator ${creatorId}`);
+    return activities;
+  }
+
+  /**
+   * Récupérer une activité par son ID
+   */
+  async getActivityById(activityId: string): Promise<ActivityDocument | null> {
+    this.validateObjectId(activityId);
+    try {
+      const activity = await this.activityModel
+        .findById(new Types.ObjectId(activityId))
+        .exec();
+      return activity;
+    } catch (e) {
+      this.logger.error(`[getActivityById] Error finding activity ${activityId}:`, e);
+      return null;
+    }
   }
 
   async isUserParticipant(activityId: string, userId: string): Promise<boolean> {

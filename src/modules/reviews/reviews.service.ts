@@ -129,23 +129,45 @@ export class ReviewsService {
     limit: number = 50,
   ): Promise<ReviewDocument[]> {
     if (!activityIds || activityIds.length === 0) {
+      this.logger.log('[getReviewsByActivityIds] No activity IDs provided');
       return [];
     }
 
+    // Convertir les IDs en ObjectId avec gestion d'erreur
     const objectIds = activityIds
-      .filter((id) => Types.ObjectId.isValid(id))
-      .map((id) => new Types.ObjectId(id));
+      .map((id) => {
+        try {
+          if (Types.ObjectId.isValid(id)) {
+            return new Types.ObjectId(id);
+          } else {
+            this.logger.warn(`[getReviewsByActivityIds] Invalid activityId: ${id}`);
+            return null;
+          }
+        } catch (e) {
+          this.logger.error(`[getReviewsByActivityIds] Error converting activityId ${id}:`, e);
+          return null;
+        }
+      })
+      .filter((id) => id !== null) as Types.ObjectId[];
 
     if (objectIds.length === 0) {
+      this.logger.warn('[getReviewsByActivityIds] No valid activity IDs after conversion');
       return [];
     }
 
-    return this.reviewModel
+    this.logger.log(
+      `[getReviewsByActivityIds] Searching reviews for ${objectIds.length} activities (from ${activityIds.length} provided)`,
+    );
+
+    const reviews = await this.reviewModel
       .find({ activityId: { $in: objectIds } })
       .populate('userId', 'name profileImageUrl')
       .sort({ createdAt: -1 })
       .limit(limit)
       .exec();
+
+    this.logger.log(`[getReviewsByActivityIds] Found ${reviews.length} reviews`);
+    return reviews;
   }
 
   /**

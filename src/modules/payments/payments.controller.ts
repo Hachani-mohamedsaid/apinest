@@ -11,6 +11,7 @@ import {
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { PaymentsService } from './payments.service';
+import { ActivitiesService } from '../activities/activities.service';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 
@@ -19,7 +20,10 @@ import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
 @UseGuards(JwtAuthGuard)
 @ApiBearerAuth()
 export class PaymentsController {
-  constructor(private readonly paymentsService: PaymentsService) {}
+  constructor(
+    private readonly paymentsService: PaymentsService,
+    private readonly activitiesService: ActivitiesService,
+  ) {}
 
   @Post('create-intent')
   @ApiOperation({ summary: 'Create a payment intent for an activity' })
@@ -100,6 +104,8 @@ export class PaymentsController {
     @Query('month') month?: number,
   ) {
     const coachId = req.user.sub;
+    
+    // Utiliser la méthode du service qui gère déjà tout
     return this.paymentsService.getCoachEarnings(coachId, year, month);
   }
 }

@@ -5,6 +5,7 @@ import { PaymentsService } from './payments.service';
 import { Activity, ActivitySchema } from '../activities/schemas/activity.schema';
 import { Payment, PaymentSchema } from './schemas/payment.schema';
 import { StripeModule } from '../stripe/stripe.module';
+import { ActivitiesModule } from '../activities/activities.module';
 
 @Module({
   imports: [
@@ -13,6 +14,7 @@ import { StripeModule } from '../stripe/stripe.module';
       { name: Payment.name, schema: PaymentSchema },
     ]),
     StripeModule,
+    ActivitiesModule, // Pour accéder à ActivitiesService
   ],
   controllers: [PaymentsController],
   providers: [PaymentsService],
