@@ -27,15 +27,67 @@ export class ActivitiesCronService {
         `[ActivitiesCronService] Checking for past activities at ${now.toISOString()}`,
       );
 
-      // Trouver toutes les activités non terminées dont la date/heure est passée
-      // On compare le champ 'time' qui contient la date et l'heure combinées
-      const pastActivities = await this.activityModel
+      // ✅ CORRIGER : Récupérer toutes les activités non complétées
+      // et vérifier manuellement si elles sont passées
+      const activities = await this.activityModel
         .find({
           isCompleted: { $ne: true },
-          time: { $lt: now }, // time est un Date qui contient date + heure
         })
         .populate('creator', 'name')
         .exec();
+
+      this.logger.debug(
+        `[ActivitiesCronService] Found ${activities.length} non-completed activities to check`,
+      );
+
+      if (activities.length === 0) {
+        this.logger.debug('[ActivitiesCronService] No non-completed activities found');
+        return;
+      }
+
+      // Filtrer les activités passées
+      const pastActivities: ActivityDocument[] = [];
+
+      for (const activity of activities) {
+        try {
+          // ✅ Combiner date et time pour obtenir la date/heure complète
+          let activityDateTime: Date | null = null;
+
+          // Priorité 1: Utiliser le champ 'time' qui contient date + heure
+          if (activity.time) {
+            activityDateTime = activity.time instanceof Date
+              ? activity.time
+              : new Date(activity.time);
+          }
+          // Priorité 2: Utiliser le champ 'date' et supposer minuit
+          else if (activity.date) {
+            activityDateTime = activity.date instanceof Date
+              ? activity.date
+              : new Date(activity.date);
+          }
+
+          // Si on n'a ni date ni time, ignorer cette activité
+          if (!activityDateTime) {
+            this.logger.warn(
+              `[ActivitiesCronService] Activity ${activity._id} has no date/time, skipping`,
+            );
+            continue;
+          }
+
+          // Vérifier si l'activité est passée
+          if (activityDateTime < now) {
+            pastActivities.push(activity);
+            this.logger.debug(
+              `[ActivitiesCronService] Activity ${activity._id} (${activity.title}) is past: ${activityDateTime.toISOString()} < ${now.toISOString()}`,
+            );
+          }
+        } catch (error) {
+          this.logger.error(
+            `[ActivitiesCronService] Error checking activity ${activity._id}: ${error.message}`,
+          );
+          continue;
+        }
+      }
 
       if (pastActivities.length === 0) {
         this.logger.debug('[ActivitiesCronService] No past activities found');
@@ -60,7 +112,17 @@ export class ActivitiesCronService {
           // Les activités individuelles (gratuites) ne nécessitent pas de review
           if (activity.price && activity.price > 0) {
             const participants = activity.participantIds || [];
-            const creatorId = activity.creator.toString();
+            
+            // Gérer le creatorId (peut être un ObjectId ou un objet populé)
+            let creatorId: string;
+            if (typeof activity.creator === 'object' && activity.creator !== null) {
+              creatorId = activity.creator._id
+                ? activity.creator._id.toString()
+                : activity.creator.toString();
+            } else {
+              creatorId = activity.creator.toString();
+            }
+            
             const participantsToNotify = participants.filter(
               (p: any) => p.toString() !== creatorId,
             );

@@ -1,42 +1,32 @@
-# 💳 Guide iOS Swift - Intégration Stripe Payment
+# 📱 Guide iOS Swift - Intégration Stripe Payment
 
-## 🎯 Vue d'Ensemble
+## Vue d'ensemble
 
-Ce guide explique comment implémenter les paiements Stripe dans votre application iOS Swift avec SwiftUI. Cette fonctionnalité permet aux utilisateurs de payer pour rejoindre des activités payantes créées par des coaches vérifiés.
-
-### Fonctionnalités
-
-- ✅ Créer un Payment Intent via le backend
-- ✅ Afficher le formulaire de paiement Stripe
-- ✅ Confirmer un paiement
-- ✅ Vérifier le statut de paiement
-- ✅ Gestion des erreurs
-- ✅ Interface utilisateur moderne avec SwiftUI
+Ce guide explique comment intégrer les paiements Stripe dans votre application iOS Swift pour permettre aux utilisateurs de payer pour participer aux activités coach.
 
 ---
 
-## 🔌 Endpoints API Backend
+## 🔌 Endpoints API disponibles
 
 ### 1. Créer un Payment Intent
-
 **POST** `/payments/create-intent`
 
-**Headers :**
+**Headers:**
 ```
-Authorization: Bearer YOUR_ACCESS_TOKEN
+Authorization: Bearer <JWT_TOKEN>
 Content-Type: application/json
 ```
 
-**Body :**
+**Body:**
 ```json
 {
-  "activityId": "507f1f77bcf86cd799439011",
+  "activityId": "692b00a20629298af4b1727c",
   "amount": 25.00,
   "currency": "eur"
 }
 ```
 
-**Réponse (201 Created) :**
+**Response (201):**
 ```json
 {
   "clientSecret": "pi_xxx_secret_xxx",
@@ -44,43 +34,55 @@ Content-Type: application/json
 }
 ```
 
-### 2. Confirmer un Paiement
+**Erreurs possibles:**
+- `400` - Activity is free or amount doesn't match
+- `404` - Activity not found
+- `401` - Unauthorized
 
+---
+
+### 2. Confirmer un paiement
 **POST** `/payments/confirm`
 
-**Headers :**
+**Headers:**
 ```
-Authorization: Bearer YOUR_ACCESS_TOKEN
+Authorization: Bearer <JWT_TOKEN>
 Content-Type: application/json
 ```
 
-**Body :**
+**Body:**
 ```json
 {
   "paymentIntentId": "pi_xxx",
-  "activityId": "507f1f77bcf86cd799439011"
+  "activityId": "692b00a20629298af4b1727c"
 }
 ```
 
-**Réponse (200 OK) :**
+**Response (200):**
 ```json
 {
   "success": true,
   "message": "Payment confirmed and user added as participant",
-  "activityId": "507f1f77bcf86cd799439011"
+  "activityId": "692b00a20629298af4b1727c"
 }
 ```
 
-### 3. Vérifier le Statut de Paiement
+**Erreurs possibles:**
+- `400` - Payment not confirmed or activity is full
+- `404` - Activity not found
+- `401` - Unauthorized
 
+---
+
+### 3. Vérifier le statut de paiement
 **GET** `/payments/check-payment/:activityId`
 
-**Headers :**
+**Headers:**
 ```
-Authorization: Bearer YOUR_ACCESS_TOKEN
+Authorization: Bearer <JWT_TOKEN>
 ```
 
-**Réponse (200 OK) :**
+**Response (200):**
 ```json
 {
   "hasPaid": true,
@@ -91,19 +93,44 @@ Authorization: Bearer YOUR_ACCESS_TOKEN
 
 ---
 
-## 📦 Installation
+### 4. Récupérer les earnings du coach
+**GET** `/payments/coach/earnings?year=2025&month=11`
+
+**Headers:**
+```
+Authorization: Bearer <JWT_TOKEN>
+```
+
+**Response (200):**
+```json
+{
+  "totalEarnings": 8450.00,
+  "earnings": [
+    {
+      "date": "2025-11-01",
+      "amount": 120.00,
+      "activityId": "692a6f3ed41d7322de5344b5",
+      "activityTitle": "Morning HIIT Training"
+    }
+  ]
+}
+```
+
+---
+
+## 📦 Installation Stripe SDK
 
 ### 1. Ajouter Stripe SDK via Swift Package Manager
 
-1. Dans Xcode, allez dans **File** > **Add Packages...**
+Dans Xcode :
+1. File → Add Packages...
 2. Entrez l'URL : `https://github.com/stripe/stripe-ios`
-3. Sélectionnez la version (recommandé : la dernière version stable)
-4. Ajoutez le package à votre projet
+3. Sélectionnez la version (recommandé : dernière version stable)
+4. Ajoutez `Stripe` et `StripePaymentSheet` à votre target
 
 ### 2. Configuration Info.plist
 
-Ajoutez dans votre `Info.plist` :
-
+Ajoutez dans `Info.plist` :
 ```xml
 <key>NSAppTransportSecurity</key>
 <dict>
@@ -114,37 +141,25 @@ Ajoutez dans votre `Info.plist` :
 
 ---
 
-## 🏗️ Architecture
-
-### Structure des Fichiers
-
-```
-📁 Models/
-  ├── PaymentIntentResponse.swift
-  ├── ConfirmPaymentRequest.swift
-  └── PaymentStatusResponse.swift
-
-📁 Services/
-  ├── PaymentService.swift
-  └── TokenManager.swift
-
-📁 ViewModels/
-  └── PaymentViewModel.swift
-
-📁 Views/
-  ├── PaymentView.swift
-  └── PaymentButton.swift
-```
-
----
-
-## 📦 Models
-
-### PaymentIntentResponse.swift
+## 📦 Modèles de données Swift
 
 ```swift
 import Foundation
 
+// MARK: - Payment Intent Request
+struct CreatePaymentIntentRequest: Codable {
+    let activityId: String
+    let amount: Double
+    let currency: String
+    
+    enum CodingKeys: String, CodingKey {
+        case activityId
+        case amount
+        case currency
+    }
+}
+
+// MARK: - Payment Intent Response
 struct PaymentIntentResponse: Codable {
     let clientSecret: String
     let paymentIntentId: String
@@ -154,71 +169,86 @@ struct PaymentIntentResponse: Codable {
         case paymentIntentId
     }
 }
-```
 
-### ConfirmPaymentRequest.swift
-
-```swift
-import Foundation
-
+// MARK: - Confirm Payment Request
 struct ConfirmPaymentRequest: Codable {
     let paymentIntentId: String
     let activityId: String
+    
+    enum CodingKeys: String, CodingKey {
+        case paymentIntentId
+        case activityId
+    }
 }
-```
 
-### PaymentStatusResponse.swift
+// MARK: - Confirm Payment Response
+struct ConfirmPaymentResponse: Codable {
+    let success: Bool
+    let message: String
+    let activityId: String
+}
 
-```swift
-import Foundation
-
-struct PaymentStatusResponse: Codable {
+// MARK: - Check Payment Response
+struct CheckPaymentResponse: Codable {
     let hasPaid: Bool
     let isParticipant: Bool
     let activityPrice: Double
-    
-    enum CodingKeys: String, CodingKey {
-        case hasPaid
-        case isParticipant
-        case activityPrice
-    }
+}
+
+// MARK: - Coach Earnings Response
+struct CoachEarningsResponse: Codable {
+    let totalEarnings: Double
+    let earnings: [EarningEntry]
+}
+
+struct EarningEntry: Codable {
+    let date: String
+    let amount: Double
+    let activityId: String
+    let activityTitle: String
 }
 ```
 
 ---
 
-## 🔧 Services
-
-### PaymentService.swift
+## 🔧 Service API
 
 ```swift
 import Foundation
+import Combine
 
-class PaymentService {
-    private let baseURL = "https://apinest-production.up.railway.app"
+class PaymentAPIService {
+    private let baseURL: String
+    private let tokenManager: TokenManager
     
-    // MARK: - Créer un Payment Intent
+    init(baseURL: String, tokenManager: TokenManager) {
+        self.baseURL = baseURL
+        self.tokenManager = tokenManager
+    }
     
+    // MARK: - Create Payment Intent
     func createPaymentIntent(
-        token: String,
         activityId: String,
         amount: Double,
         currency: String = "eur"
     ) async throws -> PaymentIntentResponse {
-        let url = URL(string: "\(baseURL)/payments/create-intent")!
+        guard let token = tokenManager.getToken() else {
+            throw APIError.unauthorized
+        }
         
+        let url = URL(string: "\(baseURL)/payments/create-intent")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        let body: [String: Any] = [
-            "activityId": activityId,
-            "amount": amount,
-            "currency": currency
-        ]
+        let body = CreatePaymentIntentRequest(
+            activityId: activityId,
+            amount: amount,
+            currency: currency
+        )
         
-        request.httpBody = try JSONSerialization.data(withJSONObject: body)
+        request.httpBody = try JSONEncoder().encode(body)
         
         let (data, response) = try await URLSession.shared.data(for: request)
         
@@ -227,33 +257,28 @@ class PaymentService {
         }
         
         guard (200...299).contains(httpResponse.statusCode) else {
-            if httpResponse.statusCode == 401 {
-                throw APIError.unauthorized
+            if httpResponse.statusCode == 400 {
+                throw APIError.badRequest("Activity is free or amount doesn't match")
             } else if httpResponse.statusCode == 404 {
-                throw APIError.notFound
-            } else if httpResponse.statusCode == 400 {
-                if let errorData = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
-                    throw APIError.badRequest(errorData.message ?? "Bad request")
-                }
-                throw APIError.badRequest("Bad request")
+                throw APIError.notFound("Activity not found")
             } else {
                 throw APIError.serverError(httpResponse.statusCode)
             }
         }
         
-        let decoder = JSONDecoder()
-        return try decoder.decode(PaymentIntentResponse.self, from: data)
+        return try JSONDecoder().decode(PaymentIntentResponse.self, from: data)
     }
     
-    // MARK: - Confirmer un Paiement
-    
+    // MARK: - Confirm Payment
     func confirmPayment(
-        token: String,
         paymentIntentId: String,
         activityId: String
     ) async throws -> ConfirmPaymentResponse {
-        let url = URL(string: "\(baseURL)/payments/confirm")!
+        guard let token = tokenManager.getToken() else {
+            throw APIError.unauthorized
+        }
         
+        let url = URL(string: "\(baseURL)/payments/confirm")!
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
@@ -273,31 +298,56 @@ class PaymentService {
         }
         
         guard (200...299).contains(httpResponse.statusCode) else {
-            if httpResponse.statusCode == 401 {
-                throw APIError.unauthorized
+            if httpResponse.statusCode == 400 {
+                throw APIError.badRequest("Payment not confirmed or activity is full")
             } else if httpResponse.statusCode == 404 {
-                throw APIError.notFound
-            } else if httpResponse.statusCode == 400 {
-                if let errorData = try? JSONDecoder().decode(ErrorResponse.self, from: data) {
-                    throw APIError.badRequest(errorData.message ?? "Bad request")
-                }
-                throw APIError.badRequest("Bad request")
+                throw APIError.notFound("Activity not found")
             } else {
                 throw APIError.serverError(httpResponse.statusCode)
             }
         }
         
-        let decoder = JSONDecoder()
-        return try decoder.decode(ConfirmPaymentResponse.self, from: data)
+        return try JSONDecoder().decode(ConfirmPaymentResponse.self, from: data)
     }
     
-    // MARK: - Vérifier le Statut de Paiement
-    
-    func checkPaymentStatus(
-        token: String,
-        activityId: String
-    ) async throws -> PaymentStatusResponse {
+    // MARK: - Check Payment Status
+    func checkPayment(activityId: String) async throws -> CheckPaymentResponse {
+        guard let token = tokenManager.getToken() else {
+            throw APIError.unauthorized
+        }
+        
         let url = URL(string: "\(baseURL)/payments/check-payment/\(activityId)")!
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        
+        let (data, response) = try await URLSession.shared.data(for: request)
+        
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 500)
+        }
+        
+        return try JSONDecoder().decode(CheckPaymentResponse.self, from: data)
+    }
+    
+    // MARK: - Get Coach Earnings
+    func getCoachEarnings(year: Int? = nil, month: Int? = nil) async throws -> CoachEarningsResponse {
+        guard let token = tokenManager.getToken() else {
+            throw APIError.unauthorized
+        }
+        
+        var urlComponents = URLComponents(string: "\(baseURL)/payments/coach/earnings")!
+        if let year = year {
+            urlComponents.queryItems = [URLQueryItem(name: "year", value: "\(year)")]
+            if let month = month {
+                urlComponents.queryItems?.append(URLQueryItem(name: "month", value: "\(month)"))
+            }
+        }
+        
+        guard let url = urlComponents.url else {
+            throw APIError.invalidURL
+        }
         
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
@@ -305,482 +355,570 @@ class PaymentService {
         
         let (data, response) = try await URLSession.shared.data(for: request)
         
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw APIError.invalidResponse
+        guard let httpResponse = response as? HTTPURLResponse,
+              (200...299).contains(httpResponse.statusCode) else {
+            throw APIError.serverError((response as? HTTPURLResponse)?.statusCode ?? 500)
         }
         
-        guard (200...299).contains(httpResponse.statusCode) else {
-            if httpResponse.statusCode == 401 {
-                throw APIError.unauthorized
-            } else if httpResponse.statusCode == 404 {
-                throw APIError.notFound
-            } else {
-                throw APIError.serverError(httpResponse.statusCode)
-            }
-        }
-        
-        let decoder = JSONDecoder()
-        return try decoder.decode(PaymentStatusResponse.self, from: data)
+        return try JSONDecoder().decode(CoachEarningsResponse.self, from: data)
     }
 }
 
-// MARK: - Response Models
-
-struct ConfirmPaymentResponse: Codable {
-    let success: Bool
-    let message: String
-    let activityId: String
-}
-```
-
-### APIError.swift (si pas déjà créé)
-
-```swift
-import Foundation
-
-enum APIError: LocalizedError {
-    case invalidResponse
+// MARK: - API Errors
+enum APIError: Error, LocalizedError {
     case unauthorized
-    case notFound
+    case invalidResponse
+    case invalidURL
     case badRequest(String)
+    case notFound(String)
     case serverError(Int)
-    case invalidData
-    case decodingError
     
     var errorDescription: String? {
         switch self {
-        case .invalidResponse:
-            return "Réponse invalide du serveur"
         case .unauthorized:
-            return "Non autorisé. Veuillez vous reconnecter."
-        case .notFound:
-            return "Ressource non trouvée"
+            return "You are not authorized. Please log in again."
+        case .invalidResponse:
+            return "Invalid response from server"
+        case .invalidURL:
+            return "Invalid URL"
         case .badRequest(let message):
             return message
+        case .notFound(let message):
+            return message
         case .serverError(let code):
-            return "Erreur serveur (\(code))"
-        case .invalidData:
-            return "Données invalides"
-        case .decodingError:
-            return "Erreur de décodage"
+            return "Server error: \(code)"
         }
     }
-}
-
-struct ErrorResponse: Codable {
-    let message: String?
-    let error: String?
 }
 ```
 
 ---
 
-## 🎨 ViewModels
+## 🎨 Implémentation UI - Payment Flow
 
-### PaymentViewModel.swift
-
-```swift
-import Foundation
-import SwiftUI
-import StripePaymentSheet
-
-@MainActor
-class PaymentViewModel: ObservableObject {
-    @Published var isLoading = false
-    @Published var isProcessingPayment = false
-    @Published var errorMessage: String?
-    @Published var paymentSheet: PaymentSheet?
-    @Published var paymentResult: PaymentSheetResult?
-    
-    private let paymentService = PaymentService()
-    private let tokenManager = TokenManager.shared
-    private var paymentIntentId: String?
-    private var activityId: String?
-    
-    // MARK: - Initialiser le Paiement
-    
-    func initializePayment(activityId: String, amount: Double) async {
-        guard let token = tokenManager.getToken() else {
-            errorMessage = "Token non disponible"
-            return
-        }
-        
-        isLoading = true
-        errorMessage = nil
-        self.activityId = activityId
-        
-        do {
-            // 1. Créer le Payment Intent via le backend
-            let paymentIntent = try await paymentService.createPaymentIntent(
-                token: token,
-                activityId: activityId,
-                amount: amount,
-                currency: "eur"
-            )
-            
-            self.paymentIntentId = paymentIntent.paymentIntentId
-            
-            // 2. Configurer Stripe Payment Sheet
-            var configuration = PaymentSheet.Configuration()
-            configuration.merchantDisplayName = "Fitness App"
-            configuration.allowsDelayedPaymentMethods = false
-            
-            // 3. Créer le Payment Sheet
-            let paymentSheet = PaymentSheet(
-                paymentIntentClientSecret: paymentIntent.clientSecret,
-                configuration: configuration
-            )
-            
-            self.paymentSheet = paymentSheet
-            
-        } catch {
-            let errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
-            self.errorMessage = errorMessage
-        }
-        
-        isLoading = false
-    }
-    
-    // MARK: - Traiter le Paiement
-    
-    func processPayment() async {
-        guard let paymentSheet = paymentSheet else {
-            errorMessage = "Payment sheet non initialisé"
-            return
-        }
-        
-        guard let token = tokenManager.getToken() else {
-            errorMessage = "Token non disponible"
-            return
-        }
-        
-        guard let paymentIntentId = paymentIntentId,
-              let activityId = activityId else {
-            errorMessage = "Informations de paiement manquantes"
-            return
-        }
-        
-        isProcessingPayment = true
-        errorMessage = nil
-        
-        // Présenter le Payment Sheet
-        // Note: Cette partie doit être gérée dans la vue avec paymentSheet.present()
-        // Ici, on simule juste le traitement après confirmation
-        
-        // Après que l'utilisateur a confirmé le paiement dans le Payment Sheet,
-        // on appelle confirmPayment
-        do {
-            let result = try await paymentService.confirmPayment(
-                token: token,
-                paymentIntentId: paymentIntentId,
-                activityId: activityId
-            )
-            
-            if result.success {
-                paymentResult = .completed
-            } else {
-                errorMessage = "Le paiement n'a pas pu être confirmé"
-            }
-        } catch {
-            let errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
-            self.errorMessage = errorMessage
-        }
-        
-        isProcessingPayment = false
-    }
-    
-    // MARK: - Vérifier le Statut de Paiement
-    
-    func checkPaymentStatus(activityId: String) async -> PaymentStatusResponse? {
-        guard let token = tokenManager.getToken() else {
-            errorMessage = "Token non disponible"
-            return nil
-        }
-        
-        do {
-            let status = try await paymentService.checkPaymentStatus(
-                token: token,
-                activityId: activityId
-            )
-            return status
-        } catch {
-            let errorMessage = (error as? APIError)?.errorDescription ?? error.localizedDescription
-            self.errorMessage = errorMessage
-            return nil
-        }
-    }
-}
-
-// MARK: - Payment Result
-
-enum PaymentSheetResult {
-    case completed
-    case failed
-    case canceled
-}
-```
-
----
-
-## 🎨 Views
-
-### PaymentView.swift
+### 1. Payment Sheet View (SwiftUI)
 
 ```swift
 import SwiftUI
 import StripePaymentSheet
 
-struct PaymentView: View {
+struct PaymentSheetView: View {
+    @Environment(\.dismiss) var dismiss
+    @StateObject private var viewModel: PaymentViewModel
+    
     let activityId: String
     let activityTitle: String
     let amount: Double
-    let currency: String = "EUR"
+    let currency: String
     
-    @StateObject private var viewModel = PaymentViewModel()
-    @State private var showingPaymentSheet = false
-    @Environment(\.dismiss) var dismiss
+    @State private var isProcessing: Bool = false
+    @State private var errorMessage: String?
+    @State private var showError: Bool = false
     
     var body: some View {
-        VStack(spacing: 20) {
-            // Header
-            VStack(spacing: 8) {
-                Text("Paiement")
-                    .font(.title)
-                    .fontWeight(.bold)
+        NavigationView {
+            VStack(spacing: 20) {
+                // Activity Info
+                VStack(spacing: 12) {
+                    Text("Join Activity")
+                        .font(.title2)
+                        .fontWeight(.bold)
+                    
+                    Text(activityTitle)
+                        .font(.headline)
+                        .foregroundColor(.secondary)
+                    
+                    Text("\(String(format: "%.2f", amount)) \(currency.uppercased())")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundColor(.blue)
+                }
+                .padding(.top, 30)
                 
-                Text(activityTitle)
-                    .font(.headline)
-                    .foregroundColor(.secondary)
-            }
-            .padding()
-            
-            // Montant
-            VStack(spacing: 4) {
-                Text("Montant")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
+                Spacer()
                 
-                Text("\(amount, specifier: "%.2f") \(currency)")
-                    .font(.title)
-                    .fontWeight(.bold)
-            }
-            .padding()
-            .frame(maxWidth: .infinity)
-            .background(Color.gray.opacity(0.1))
-            .cornerRadius(12)
-            .padding(.horizontal)
-            
-            // Bouton de paiement
-            if viewModel.isLoading {
-                ProgressView("Initialisation du paiement...")
-                    .frame(maxWidth: .infinity)
-                    .padding()
-            } else if let paymentSheet = viewModel.paymentSheet {
+                // Payment Button
                 Button(action: {
-                    showingPaymentSheet = true
+                    processPayment()
                 }) {
-                    HStack {
-                        Image(systemName: "creditcard.fill")
-                        Text("Payer \(amount, specifier: "%.2f") \(currency)")
+                    if isProcessing {
+                        ProgressView()
+                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
+                    } else {
+                        Text("Pay \(String(format: "%.2f", amount)) \(currency.uppercased())")
                             .fontWeight(.semibold)
                     }
-                    .frame(maxWidth: .infinity)
-                    .padding()
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(12)
                 }
+                .frame(maxWidth: .infinity)
+                .frame(height: 50)
+                .background(isProcessing ? Color.gray : Color.blue)
+                .foregroundColor(.white)
+                .cornerRadius(12)
                 .padding(.horizontal)
-                .sheet(isPresented: $showingPaymentSheet) {
-                    PaymentSheetView(
-                        paymentSheet: paymentSheet,
-                        onCompletion: { result in
-                            handlePaymentResult(result)
-                        }
-                    )
-                }
-            } else {
+                .disabled(isProcessing)
+                
+                // Cancel Button
                 Button(action: {
-                    Task {
-                        await viewModel.initializePayment(
-                            activityId: activityId,
-                            amount: amount
-                        )
-                    }
-                }) {
-                    Text("Initialiser le Paiement")
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
-                        .padding()
-                        .background(Color.gray)
-                        .foregroundColor(.white)
-                        .cornerRadius(12)
-                }
-                .padding(.horizontal)
-            }
-            
-            // Message d'erreur
-            if let errorMessage = viewModel.errorMessage {
-                Text(errorMessage)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .padding()
-            }
-            
-            Spacer()
-        }
-        .padding()
-        .navigationTitle("Paiement")
-        .navigationBarTitleDisplayMode(.inline)
-    }
-    
-    private func handlePaymentResult(_ result: PaymentSheetResult) {
-        switch result {
-        case .completed:
-            Task {
-                await viewModel.processPayment()
-                if viewModel.errorMessage == nil {
                     dismiss()
+                }) {
+                    Text("Cancel")
+                        .foregroundColor(.secondary)
                 }
+                .padding(.bottom, 20)
             }
-        case .failed:
-            viewModel.errorMessage = "Le paiement a échoué"
-        case .canceled:
-            // L'utilisateur a annulé, ne rien faire
-            break
-        }
-    }
-}
-
-// MARK: - Payment Sheet View
-
-struct PaymentSheetView: UIViewControllerRepresentable {
-    let paymentSheet: PaymentSheet
-    let onCompletion: (PaymentSheetResult) -> Void
-    
-    func makeUIViewController(context: Context) -> UIViewController {
-        let viewController = UIViewController()
-        
-        DispatchQueue.main.async {
-            paymentSheet.present(from: viewController) { result in
-                switch result {
-                case .completed:
-                    onCompletion(.completed)
-                case .failed(let error):
-                    print("Payment failed: \(error.localizedDescription)")
-                    onCompletion(.failed)
-                case .canceled:
-                    onCompletion(.canceled)
-                }
+            .navigationBarTitleDisplayMode(.inline)
+            .alert("Payment Error", isPresented: $showError) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(errorMessage ?? "An error occurred")
             }
         }
-        
-        return viewController
+        .onAppear {
+            viewModel.preparePayment(activityId: activityId, amount: amount, currency: currency)
+        }
     }
     
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {
-        // Pas besoin de mise à jour
+    private func processPayment() {
+        isProcessing = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                let result = try await viewModel.processPayment()
+                
+                await MainActor.run {
+                    isProcessing = false
+                    if result {
+                        dismiss()
+                        // Optionnel: Afficher un message de succès
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    isProcessing = false
+                    errorMessage = error.localizedDescription
+                    showError = true
+                }
+            }
+        }
     }
 }
 ```
 
-### ActivityDetailView.swift (Exemple d'utilisation)
+---
+
+### 2. Payment ViewModel
+
+```swift
+import Foundation
+import StripePaymentSheet
+import Combine
+
+@MainActor
+class PaymentViewModel: ObservableObject {
+    private let apiService: PaymentAPIService
+    private let publishableKey: String
+    
+    @Published var paymentSheet: PaymentSheet?
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String?
+    
+    private var currentPaymentIntentId: String?
+    private var currentActivityId: String?
+    
+    init(apiService: PaymentAPIService, publishableKey: String) {
+        self.apiService = apiService
+        self.publishableKey = publishableKey
+        
+        // Configurer Stripe avec la clé publique
+        StripeAPI.defaultPublishableKey = publishableKey
+    }
+    
+    // MARK: - Prepare Payment
+    func preparePayment(activityId: String, amount: Double, currency: String) {
+        isLoading = true
+        
+        Task {
+            do {
+                // 1. Créer le Payment Intent côté backend
+                let paymentIntent = try await apiService.createPaymentIntent(
+                    activityId: activityId,
+                    amount: amount,
+                    currency: currency
+                )
+                
+                currentPaymentIntentId = paymentIntent.paymentIntentId
+                currentActivityId = activityId
+                
+                // 2. Configurer PaymentSheet avec le clientSecret
+                var configuration = PaymentSheet.Configuration()
+                configuration.merchantDisplayName = "Fitness App"
+                configuration.applePay = .init(
+                    merchantId: "merchant.com.yourapp.fitness", // Votre Merchant ID
+                    merchantCountryCode: "FR"
+                )
+                
+                let paymentSheet = PaymentSheet(
+                    paymentIntentClientSecret: paymentIntent.clientSecret,
+                    configuration: configuration
+                )
+                
+                await MainActor.run {
+                    self.paymentSheet = paymentSheet
+                    self.isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.isLoading = false
+                }
+            }
+        }
+    }
+    
+    // MARK: - Process Payment
+    func processPayment() async throws -> Bool {
+        guard let paymentSheet = paymentSheet else {
+            throw PaymentError.paymentSheetNotReady
+        }
+        
+        guard let windowScene = UIApplication.shared.connectedScenes.first as? UIWindowScene,
+              let window = windowScene.windows.first,
+              let rootViewController = window.rootViewController else {
+            throw PaymentError.noViewController
+        }
+        
+        // Afficher le PaymentSheet
+        return try await withCheckedThrowingContinuation { continuation in
+            paymentSheet.present(from: rootViewController) { [weak self] paymentResult in
+                guard let self = self else {
+                    continuation.resume(throwing: PaymentError.unknown)
+                    return
+                }
+                
+                switch paymentResult {
+                case .completed:
+                    // Confirmer le paiement côté backend
+                    Task {
+                        do {
+                            guard let paymentIntentId = self.currentPaymentIntentId,
+                                  let activityId = self.currentActivityId else {
+                                continuation.resume(throwing: PaymentError.missingData)
+                                return
+                            }
+                            
+                            let result = try await self.apiService.confirmPayment(
+                                paymentIntentId: paymentIntentId,
+                                activityId: activityId
+                            )
+                            
+                            if result.success {
+                                continuation.resume(returning: true)
+                            } else {
+                                continuation.resume(throwing: PaymentError.confirmationFailed)
+                            }
+                        } catch {
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                    
+                case .canceled:
+                    continuation.resume(returning: false)
+                    
+                case .failed(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+}
+
+// MARK: - Payment Errors
+enum PaymentError: Error, LocalizedError {
+    case paymentSheetNotReady
+    case noViewController
+    case missingData
+    case confirmationFailed
+    case unknown
+    
+    var errorDescription: String? {
+        switch self {
+        case .paymentSheetNotReady:
+            return "Payment sheet is not ready. Please try again."
+        case .noViewController:
+            return "Unable to present payment sheet."
+        case .missingData:
+            return "Missing payment data."
+        case .confirmationFailed:
+            return "Payment confirmation failed."
+        case .unknown:
+            return "An unknown error occurred."
+        }
+    }
+}
+```
+
+---
+
+### 3. Activity Detail View avec Payment
 
 ```swift
 import SwiftUI
 
 struct ActivityDetailView: View {
-    let activity: Activity
-    @State private var showingPayment = false
-    @State private var paymentStatus: PaymentStatusResponse?
+    @StateObject private var viewModel: ActivityDetailViewModel
+    @State private var showPaymentSheet: Bool = false
+    
+    let activityId: String
     
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // Informations de l'activité
-                Text(activity.title)
-                    .font(.title)
-                    .fontWeight(.bold)
+                // Activity Info
+                // ... (votre UI existante)
                 
-                if let price = activity.price, price > 0 {
-                    Text("Prix: \(price, specifier: "%.2f") €")
-                        .font(.headline)
-                        .foregroundColor(.blue)
-                }
-                
-                // Bouton Rejoindre
-                if let price = activity.price, price > 0 {
-                    // Activité payante
-                    if paymentStatus?.hasPaid == true {
-                        Label("Déjà payé", systemImage: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                    } else {
-                        Button(action: {
-                            showingPayment = true
-                        }) {
-                            HStack {
-                                Image(systemName: "creditcard.fill")
-                                Text("Rejoindre - \(price, specifier: "%.2f") €")
-                                    .fontWeight(.semibold)
+                // Payment Section
+                if let activity = viewModel.activity,
+                   let price = activity.price,
+                   price > 0 {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Join this Activity")
+                            .font(.headline)
+                        
+                        HStack {
+                            VStack(alignment: .leading) {
+                                Text("Price")
+                                    .font(.subheadline)
+                                    .foregroundColor(.secondary)
+                                Text("\(String(format: "%.2f", price)) €")
+                                    .font(.title2)
+                                    .fontWeight(.bold)
                             }
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.blue)
-                            .foregroundColor(.white)
-                            .cornerRadius(12)
+                            
+                            Spacer()
+                            
+                            Button(action: {
+                                showPaymentSheet = true
+                            }) {
+                                Text("Pay Now")
+                                    .fontWeight(.semibold)
+                                    .foregroundColor(.white)
+                                    .padding(.horizontal, 24)
+                                    .padding(.vertical, 12)
+                                    .background(Color.blue)
+                                    .cornerRadius(8)
+                            }
+                            .disabled(viewModel.isParticipant || viewModel.isLoading)
                         }
+                        .padding()
+                        .background(Color(.systemGray6))
+                        .cornerRadius(12)
                     }
                 } else {
-                    // Activité gratuite
+                    // Free activity - Join button
                     Button(action: {
-                        // Rejoindre l'activité gratuite
+                        viewModel.joinActivity()
                     }) {
-                        Text("Rejoindre gratuitement")
+                        Text("Join Activity")
                             .fontWeight(.semibold)
-                            .frame(maxWidth: .infinity)
-                            .padding()
-                            .background(Color.green)
                             .foregroundColor(.white)
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 50)
+                            .background(Color.blue)
                             .cornerRadius(12)
                     }
+                    .disabled(viewModel.isParticipant || viewModel.isLoading)
                 }
             }
             .padding()
         }
-        .navigationTitle("Détails")
-        .sheet(isPresented: $showingPayment) {
-            if let price = activity.price {
-                PaymentView(
-                    activityId: activity.id,
+        .navigationTitle(viewModel.activity?.title ?? "Activity")
+        .sheet(isPresented: $showPaymentSheet) {
+            if let activity = viewModel.activity,
+               let price = activity.price {
+                PaymentSheetView(
+                    viewModel: PaymentViewModel(
+                        apiService: PaymentAPIService(
+                            baseURL: "https://your-api-url.com",
+                            tokenManager: TokenManager.shared
+                        ),
+                        publishableKey: "pk_test_51SYaif56MHhsen2TYcMDg9VElyxzT8UsB8kWKaPrgxKwprD0tJIFe05w8GAVwNjOVD1cQBA0jfuqKPBEtylYqTBn00EdT2Q2ta"
+                    ),
+                    activityId: activityId,
                     activityTitle: activity.title,
-                    amount: price
+                    amount: price,
+                    currency: "eur"
                 )
             }
         }
-        .task {
-            // Vérifier le statut de paiement au chargement
-            if let price = activity.price, price > 0 {
-                await checkPaymentStatus()
+        .onAppear {
+            viewModel.loadActivity(activityId: activityId)
+            viewModel.checkPaymentStatus(activityId: activityId)
+        }
+    }
+}
+```
+
+---
+
+### 4. Coach Earnings View
+
+```swift
+import SwiftUI
+
+struct CoachEarningsView: View {
+    @StateObject private var viewModel: CoachEarningsViewModel
+    @State private var selectedYear: Int = Calendar.current.component(.year, from: Date())
+    @State private var selectedMonth: Int? = Calendar.current.component(.month, from: Date())
+    
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                // Total Earnings Card
+                if let earnings = viewModel.earnings {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Total Earnings")
+                            .font(.headline)
+                            .foregroundColor(.secondary)
+                        
+                        Text("\(String(format: "%.2f", earnings.totalEarnings)) €")
+                            .font(.system(size: 48, weight: .bold))
+                            .foregroundColor(.green)
+                    }
+                    .padding()
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.systemGray6))
+                    .cornerRadius(12)
+                    
+                    // Filter Picker
+                    HStack {
+                        Picker("Year", selection: $selectedYear) {
+                            ForEach(2020...2030, id: \.self) { year in
+                                Text("\(year)").tag(year)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        
+                        Picker("Month", selection: $selectedMonth) {
+                            Text("All").tag(nil as Int?)
+                            ForEach(1...12, id: \.self) { month in
+                                Text(monthName(month)).tag(month as Int?)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                    }
+                    .onChange(of: selectedYear) { _ in
+                        loadEarnings()
+                    }
+                    .onChange(of: selectedMonth) { _ in
+                        loadEarnings()
+                    }
+                    
+                    // Earnings List
+                    if earnings.earnings.isEmpty {
+                        Text("No earnings for this period")
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .padding()
+                    } else {
+                        ForEach(earnings.earnings, id: \.activityId) { earning in
+                            EarningsRowView(earning: earning)
+                        }
+                    }
+                } else if viewModel.isLoading {
+                    ProgressView()
+                        .frame(maxWidth: .infinity)
+                        .padding()
+                }
             }
+            .padding()
+        }
+        .navigationTitle("My Earnings")
+        .onAppear {
+            loadEarnings()
         }
     }
     
-    private func checkPaymentStatus() async {
-        let paymentService = PaymentService()
-        let tokenManager = TokenManager.shared
-        
-        guard let token = tokenManager.getToken() else {
-            return
+    private func loadEarnings() {
+        viewModel.loadEarnings(year: selectedYear, month: selectedMonth)
+    }
+    
+    private func monthName(_ month: Int) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMMM"
+        let date = Calendar.current.date(from: DateComponents(month: month))!
+        return formatter.string(from: date)
+    }
+}
+
+struct EarningsRowView: View {
+    let earning: EarningEntry
+    
+    var body: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(earning.activityTitle)
+                    .font(.headline)
+                
+                Text(formatDate(earning.date))
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            
+            Spacer()
+            
+            Text("\(String(format: "%.2f", earning.amount)) €")
+                .font(.headline)
+                .foregroundColor(.green)
+        }
+        .padding()
+        .background(Color(.systemBackground))
+        .cornerRadius(12)
+        .shadow(color: Color.black.opacity(0.05), radius: 5, x: 0, y: 2)
+    }
+    
+    private func formatDate(_ dateString: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: dateString) else {
+            return dateString
         }
         
-        do {
-            let status = try await paymentService.checkPaymentStatus(
-                token: token,
-                activityId: activity.id
-            )
-            paymentStatus = status
-        } catch {
-            print("Erreur lors de la vérification du statut: \(error)")
+        let displayFormatter = DateFormatter()
+        displayFormatter.dateStyle = .medium
+        return displayFormatter.string(from: date)
+    }
+}
+
+// MARK: - ViewModel
+@MainActor
+class CoachEarningsViewModel: ObservableObject {
+    @Published var earnings: CoachEarningsResponse?
+    @Published var isLoading: Bool = false
+    @Published var errorMessage: String?
+    
+    private let apiService: PaymentAPIService
+    
+    init(apiService: PaymentAPIService) {
+        self.apiService = apiService
+    }
+    
+    func loadEarnings(year: Int? = nil, month: Int? = nil) {
+        isLoading = true
+        errorMessage = nil
+        
+        Task {
+            do {
+                let earnings = try await apiService.getCoachEarnings(year: year, month: month)
+                
+                await MainActor.run {
+                    self.earnings = earnings
+                    self.isLoading = false
+                }
+            } catch {
+                await MainActor.run {
+                    self.errorMessage = error.localizedDescription
+                    self.isLoading = false
+                }
+            }
         }
     }
 }
@@ -788,96 +926,260 @@ struct ActivityDetailView: View {
 
 ---
 
-## 🔧 Configuration Stripe
+## 🔐 Configuration
 
-### AppDelegate.swift ou SceneDelegate.swift
+### 1. Variables d'environnement
+
+Créez un fichier `Config.swift` :
 
 ```swift
-import UIKit
-import StripeCore
+import Foundation
 
-@main
-class AppDelegate: UIResponder, UIApplicationDelegate {
-    func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Configurer Stripe avec votre clé publique
-        StripeAPI.defaultPublishableKey = "pk_test_..." // Votre clé publique Stripe
-        
-        return true
+struct AppConfig {
+    static let stripePublishableKey = "pk_test_51SYaif56MHhsen2TYcMDg9VElyxzT8UsB8kWKaPrgxKwprD0tJIFe05w8GAVwNjOVD1cQBA0jfuqKPBEtylYqTBn00EdT2Q2ta"
+    static let apiBaseURL = "https://your-api-url.com"
+    
+    // Pour la production, utilisez les clés de production
+    // static let stripePublishableKey = "pk_live_..."
+}
+```
+
+### 2. Token Manager
+
+```swift
+import Foundation
+
+class TokenManager {
+    static let shared = TokenManager()
+    
+    private let keychainKey = "jwt_token"
+    
+    private init() {}
+    
+    func getToken() -> String? {
+        // Récupérer depuis Keychain
+        // Implémentation Keychain ici
+        return UserDefaults.standard.string(forKey: keychainKey)
+    }
+    
+    func saveToken(_ token: String) {
+        UserDefaults.standard.set(token, forKey: keychainKey)
+        // Sauvegarder aussi dans Keychain pour plus de sécurité
+    }
+    
+    func removeToken() {
+        UserDefaults.standard.removeObject(forKey: keychainKey)
+        // Supprimer aussi de Keychain
     }
 }
 ```
 
-**⚠️ Important :** Utilisez la clé publique (`pk_test_...` pour le test, `pk_live_...` pour la production).
-
 ---
 
-## 🧪 Tests
+## 🧪 Test avec les cartes Stripe
 
-### Cartes de Test Stripe
+### Cartes de test
 
 Utilisez ces cartes pour tester :
 
-#### ✅ Paiement Réussi
-```
-Numéro : 4242 4242 4242 4242
-Date : 12/25 (ou n'importe quelle date future)
-CVC : 123
-Code postal : 12345
-```
+**Paiement réussi :**
+- Numéro : `4242 4242 4242 4242`
+- Date d'expiration : N'importe quelle date future (ex: 12/25)
+- CVC : N'importe quel code à 3 chiffres (ex: 123)
+- Code postal : N'importe quel code postal (ex: 12345)
 
-#### ❌ Paiement Refusé
-```
-Numéro : 4000 0000 0000 0002
-Date : 12/25
-CVC : 123
-```
+**Paiement refusé :**
+- Numéro : `4000 0000 0000 0002`
 
-### Test du Flux Complet
-
-1. **Créer une activité payante** (via votre app ou API)
-2. **Afficher l'activité** dans ActivityDetailView
-3. **Cliquer sur "Rejoindre"** → Ouvre PaymentView
-4. **Initialiser le paiement** → Crée le Payment Intent
-5. **Afficher le formulaire Stripe** → Payment Sheet s'affiche
-6. **Saisir la carte de test** : `4242 4242 4242 4242`
-7. **Confirmer le paiement** → Le paiement est traité
-8. **Vérifier** → L'utilisateur est ajouté comme participant
+**3D Secure requis :**
+- Numéro : `4000 0027 6000 3184`
 
 ---
 
-## ✅ Checklist iOS
+## 📱 Flux complet
 
-- [ ] Stripe SDK installé via Swift Package Manager
-- [ ] Clé publique Stripe configurée dans AppDelegate
-- [ ] Models créés (PaymentIntentResponse, ConfirmPaymentRequest, etc.)
-- [ ] PaymentService implémenté avec tous les endpoints
-- [ ] PaymentViewModel créé avec gestion du Payment Sheet
-- [ ] PaymentView créée avec interface utilisateur
-- [ ] PaymentSheetView créée pour présenter le formulaire Stripe
-- [ ] Gestion des erreurs implémentée
-- [ ] Testé avec les cartes de test Stripe
-- [ ] Vérification du statut de paiement implémentée
+### 1. Utilisateur clique sur "Pay Now"
+
+```swift
+// Dans ActivityDetailView
+Button("Pay Now") {
+    showPaymentSheet = true
+}
+```
+
+### 2. Créer Payment Intent
+
+```swift
+// Dans PaymentViewModel.preparePayment
+let paymentIntent = try await apiService.createPaymentIntent(
+    activityId: activityId,
+    amount: amount,
+    currency: currency
+)
+```
+
+### 3. Afficher PaymentSheet
+
+```swift
+// Dans PaymentViewModel.processPayment
+paymentSheet.present(from: rootViewController) { paymentResult in
+    switch paymentResult {
+    case .completed:
+        // Confirmer le paiement
+    case .canceled:
+        // L'utilisateur a annulé
+    case .failed(let error):
+        // Erreur de paiement
+    }
+}
+```
+
+### 4. Confirmer le paiement côté backend
+
+```swift
+// Dans PaymentViewModel.processPayment
+let result = try await apiService.confirmPayment(
+    paymentIntentId: paymentIntentId,
+    activityId: activityId
+)
+```
+
+### 5. Mettre à jour l'UI
+
+```swift
+// Dans ActivityDetailView
+.onChange(of: paymentCompleted) { completed in
+    if completed {
+        // Rafraîchir l'activité
+        viewModel.loadActivity(activityId: activityId)
+    }
+}
+```
 
 ---
 
-## 🎉 Résumé
+## ✅ Checklist d'implémentation
 
-Vous avez maintenant une implémentation complète pour :
-
-1. ✅ **Créer des Payment Intents** via le backend
-2. ✅ **Afficher le formulaire de paiement** Stripe
-3. ✅ **Confirmer les paiements** et ajouter les participants
-4. ✅ **Vérifier le statut** de paiement
-5. ✅ **Gérer les erreurs** de manière appropriée
-6. ✅ **Interface utilisateur moderne** avec SwiftUI
-
-L'application iOS peut maintenant gérer les paiements Stripe pour les activités payantes ! 🚀
+- [ ] Installer Stripe SDK via Swift Package Manager
+- [ ] Configurer la clé publique Stripe
+- [ ] Créer les modèles de données (PaymentIntent, ConfirmPayment, etc.)
+- [ ] Implémenter PaymentAPIService
+- [ ] Créer PaymentViewModel
+- [ ] Créer PaymentSheetView
+- [ ] Intégrer dans ActivityDetailView
+- [ ] Ajouter la gestion d'erreurs
+- [ ] Tester avec les cartes de test Stripe
+- [ ] Implémenter CoachEarningsView pour le dashboard
+- [ ] Gérer les cas d'erreur (activité complète, paiement échoué, etc.)
 
 ---
 
-## 📚 Ressources
+## 🐛 Gestion des erreurs
+
+### Erreurs courantes
+
+1. **Payment Sheet Not Ready**
+   - Vérifier que `preparePayment` a été appelé
+   - Vérifier que le `clientSecret` est valide
+
+2. **Payment Confirmation Failed**
+   - Vérifier que le Payment Intent est bien `succeeded` dans Stripe
+   - Vérifier la connexion réseau
+
+3. **Activity Full**
+   - Vérifier le nombre de participants avant d'afficher le PaymentSheet
+   - Afficher un message d'erreur approprié
+
+### Exemple de gestion d'erreur
+
+```swift
+enum PaymentError: Error, LocalizedError {
+    case paymentSheetNotReady
+    case paymentFailed(String)
+    case activityFull
+    case networkError
+    
+    var errorDescription: String? {
+        switch self {
+        case .paymentSheetNotReady:
+            return "Payment is not ready. Please try again."
+        case .paymentFailed(let message):
+            return "Payment failed: \(message)"
+        case .activityFull:
+            return "This activity is full. Please choose another activity."
+        case .networkError:
+            return "Network error. Please check your connection."
+        }
+    }
+}
+```
+
+---
+
+## 📚 Ressources supplémentaires
 
 - [Documentation Stripe iOS](https://stripe.com/docs/payments/accept-a-payment?platform=ios)
-- [Stripe iOS SDK](https://github.com/stripe/stripe-ios)
-- [Cartes de Test Stripe](https://stripe.com/docs/testing)
+- [Stripe iOS SDK GitHub](https://github.com/stripe/stripe-ios)
+- [Guide Backend Stripe](./STRIPE_SETUP.md)
+- [Guide Testing Stripe](./STRIPE_TESTING_GUIDE.md)
 
+---
+
+## 🎯 Exemples d'utilisation
+
+### Vérifier le statut de paiement avant d'afficher le bouton
+
+```swift
+struct ActivityDetailView: View {
+    @StateObject private var viewModel: ActivityDetailViewModel
+    
+    var body: some View {
+        // ...
+        
+        if let activity = viewModel.activity,
+           let price = activity.price,
+           price > 0 {
+            if viewModel.hasPaid {
+                Label("Paid", systemImage: "checkmark.circle.fill")
+                    .foregroundColor(.green)
+            } else if viewModel.isParticipant {
+                Label("Joined", systemImage: "person.fill.checkmark")
+            } else {
+                Button("Pay Now") {
+                    showPaymentSheet = true
+                }
+            }
+        }
+    }
+}
+```
+
+### Afficher les earnings dans le Coach Dashboard
+
+```swift
+struct CoachDashboardView: View {
+    var body: some View {
+        TabView {
+            // ... autres onglets
+            
+            NavigationView {
+                CoachEarningsView(
+                    viewModel: CoachEarningsViewModel(
+                        apiService: PaymentAPIService(
+                            baseURL: AppConfig.apiBaseURL,
+                            tokenManager: TokenManager.shared
+                        )
+                    )
+                )
+            }
+            .tabItem {
+                Label("Earnings", systemImage: "dollarsign.circle")
+            }
+        }
+    }
+}
+```
+
+---
+
+**Note:** Remplacez `"https://your-api-url.com"` par l'URL réelle de votre API backend et `"pk_test_..."` par votre clé publique Stripe.
