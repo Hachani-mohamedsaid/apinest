@@ -8,6 +8,8 @@ import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Review, ReviewDocument } from './schemas/review.schema';
 import { Activity, ActivityDocument } from '../activities/schemas/activity.schema';
+import { ActivitiesService } from '../activities/activities.service';
+import { UsersService } from '../users/users.service';
 
 @Injectable()
 export class ReviewsService {
@@ -16,6 +18,8 @@ export class ReviewsService {
   constructor(
     @InjectModel(Review.name) private reviewModel: Model<ReviewDocument>,
     @InjectModel(Activity.name) private activityModel: Model<ActivityDocument>,
+    private readonly activitiesService: ActivitiesService,
+    private readonly usersService: UsersService,
   ) {}
 
   /**
@@ -197,13 +201,24 @@ export class ReviewsService {
     this.logger.log(`[getCoachReviews] Fetching reviews for coach: ${coachId}`);
 
     // Récupérer toutes les activités créées par ce coach
-    const coachActivities = await this.activityModel
-      .find({ creator: new Types.ObjectId(coachId) })
-      .exec();
+    // Utiliser getActivitiesByCreator pour être cohérent
+    const coachActivities = await this.activitiesService.getActivitiesByCreator(coachId);
 
     this.logger.log(
       `[getCoachReviews] Found ${coachActivities.length} activities for coach ${coachId}`,
     );
+    
+    // Debug: Log quelques activités pour vérifier
+    if (coachActivities.length > 0) {
+      coachActivities.slice(0, 3).forEach((activity) => {
+        const creatorId = typeof activity.creator === 'object' && activity.creator !== null
+          ? (activity.creator as any)._id?.toString() || activity.creator.toString()
+          : activity.creator.toString();
+        this.logger.debug(
+          `[getCoachReviews] Activity ${activity._id.toString()}: title=${activity.title}, creator=${creatorId}, isCompleted=${activity.isCompleted}, price=${activity.price}`,
+        );
+      });
+    }
 
     if (coachActivities.length === 0) {
       this.logger.warn(
