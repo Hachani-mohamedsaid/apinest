@@ -200,76 +200,49 @@ export class ReviewsService {
 
     this.logger.log(`[getCoachReviews] Fetching reviews for coach: ${coachId}`);
 
-    // Récupérer toutes les activités créées par ce coach
-    // Utiliser getActivitiesByCreator pour être cohérent
-    const coachActivities = await this.activitiesService.getActivitiesByCreator(coachId);
+    // ✅ MÉTHODE PRINCIPALE : Récupérer directement depuis les reviews (fallback qui fonctionne)
+    // Cette méthode fonctionne car elle utilise getActivityById qui trouve bien les activités
+    const allReviews = await this.reviewModel.find({}).exec();
+    this.logger.log(`[getCoachReviews] Total reviews in database: ${allReviews.length}`);
 
-    this.logger.log(
-      `[getCoachReviews] Found ${coachActivities.length} activities for coach ${coachId}`,
-    );
-    
-    // Debug: Log quelques activités pour vérifier
-    if (coachActivities.length > 0) {
-      coachActivities.slice(0, 3).forEach((activity) => {
-        const creatorId = typeof activity.creator === 'object' && activity.creator !== null
-          ? (activity.creator as any)._id?.toString() || activity.creator.toString()
-          : activity.creator.toString();
-        this.logger.debug(
-          `[getCoachReviews] Activity ${activity._id.toString()}: title=${activity.title}, creator=${creatorId}, isCompleted=${activity.isCompleted}, price=${activity.price || 0}`,
-        );
-      });
-    }
+    // Pour chaque review, vérifier si l'activité est créée par le coach ET est complétée avec prix > 0
+    const coachActivityIds = new Set<string>();
+    const coachActivities = new Map<string, any>(); // Stocker les activités pour éviter de les re-fetch
 
-    // ✅ Filtrer seulement les activités complétées avec prix > 0 (coach activities)
-    const completedCoachActivities = coachActivities.filter(
-      (activity) => activity.isCompleted === true && activity.price && activity.price > 0,
-    );
-    
-    this.logger.log(
-      `[getCoachReviews] Found ${completedCoachActivities.length} completed coach activities (with price > 0) out of ${coachActivities.length} total activities`,
-    );
-
-    if (completedCoachActivities.length === 0) {
-      this.logger.warn(
-        `[getCoachReviews] No completed coach activities (with price > 0) found for coach ${coachId}, returning empty reviews`,
-      );
+    for (const review of allReviews) {
+      const activityId = typeof review.activityId === 'object' && review.activityId !== null
+        ? (review.activityId as any).toString()
+        : String(review.activityId);
       
-      // Debug: Vérifier s'il y a des reviews dans la base
-      const allReviewsCount = await this.reviewModel.countDocuments({}).exec();
-      this.logger.log(
-        `[getCoachReviews] Total reviews in database: ${allReviewsCount}`,
-      );
-      
-      if (allReviewsCount > 0) {
-        // Récupérer quelques reviews pour voir leurs activityIds
-        const sampleReviews = await this.reviewModel
-          .find({})
-          .limit(5)
-          .select('activityId')
-          .exec();
-        const sampleActivityIds = sampleReviews.map((r) => r.activityId.toString());
-        this.logger.log(
-          `[getCoachReviews] Sample review activityIds: ${sampleActivityIds.join(', ')}`,
-        );
-        
-        // Vérifier qui a créé ces activités
-        for (const review of sampleReviews) {
-          const activity = await this.activityModel
-            .findById(review.activityId)
-            .select('creator title')
-            .exec();
-          if (activity) {
+      try {
+        const activity = await this.activitiesService.getActivityById(activityId);
+        if (activity) {
+          // Vérifier le creator (gérer différents formats)
+          const activityCreatorId = typeof activity.creator === 'object' && activity.creator !== null
+            ? (activity.creator._id ? activity.creator._id.toString() : activity.creator.toString())
+            : activity.creator?.toString() || '';
+          
+          // ✅ Vérifier que l'activité est créée par le coach, est complétée, et a un prix > 0
+          if (activityCreatorId === coachId && 
+              activity.isCompleted === true && 
+              activity.price && activity.price > 0) {
+            coachActivityIds.add(activityId);
+            coachActivities.set(activityId, activity);
             this.logger.log(
-              `[getCoachReviews] Activity ${review.activityId.toString()} created by ${activity.creator.toString()}, title: ${activity.title}`,
-            );
-          } else {
-            this.logger.warn(
-              `[getCoachReviews] Activity ${review.activityId.toString()} not found in database`,
+              `[getCoachReviews] ✅ Activity ${activityId} created by ${coachId}, ` +
+              `title: ${activity.title}, isCompleted: ${activity.isCompleted}, price: ${activity.price}`,
             );
           }
         }
+      } catch (e) {
+        this.logger.warn(`[getCoachReviews] Error fetching activity ${activityId}: ${e.message}`);
       }
-      
+    }
+
+    this.logger.log(`[getCoachReviews] Found ${coachActivityIds.size} completed coach activities for coach ${coachId}`);
+
+    if (coachActivityIds.size === 0) {
+      this.logger.warn(`[getCoachReviews] No completed coach activities found for coach ${coachId}, returning empty reviews`);
       return {
         reviews: [],
         averageRating: 0,
@@ -277,83 +250,95 @@ export class ReviewsService {
       };
     }
 
-    // ✅ Utiliser seulement les activités complétées avec prix > 0
-    const activityIds = completedCoachActivities.map((a) => a._id.toString());
-    this.logger.log(
-      `[getCoachReviews] Looking for reviews for ${activityIds.length} activities: ${activityIds.join(', ')}`,
-    );
+    // ✅ Récupérer les reviews pour ces activités
+    const reviews = await this.reviewModel
+      .find({ 
+        activityId: { $in: Array.from(coachActivityIds).map(id => new Types.ObjectId(id)) },
+      })
+      .populate('userId', 'name profileImageUrl')
+      .limit(limit)
+      .sort({ createdAt: -1 })
+      .exec();
 
-    // Récupérer les reviews pour ces activités
-    const reviews = await this.getReviewsByActivityIds(activityIds, limit);
+    this.logger.log(`[getCoachReviews] Found ${reviews.length} reviews for coach ${coachId}`);
 
-    this.logger.log(
-      `[getCoachReviews] Found ${reviews.length} reviews for coach ${coachId}`,
-    );
-
-    // Créer un map pour accéder rapidement aux activités (seulement les complétées)
-    const activitiesMap = new Map();
-    completedCoachActivities.forEach((activity) => {
-      activitiesMap.set(activity._id.toString(), activity);
-    });
-
-    // Enrichir avec les informations de l'activité et de l'utilisateur
-    const enrichedReviews = reviews.map((review) => {
-      const activity = activitiesMap.get(review.activityId.toString());
-      
-      // Gérer le populate de userId
-      let userName = 'Unknown';
-      let userAvatar: string | null = null;
-      
-      if (review.userId) {
-        // Si userId est populé (objet avec toObject)
-        if (typeof review.userId === 'object' && 'toObject' in review.userId) {
-          const userObj = (review.userId as any).toObject();
-          userName = userObj?.name || 'Unknown';
-          userAvatar = userObj?.profileImageUrl || null;
-        } else if (typeof review.userId === 'object' && 'name' in review.userId) {
-          // Si userId est déjà un objet avec name
-          userName = (review.userId as any).name || 'Unknown';
-          userAvatar = (review.userId as any).profileImageUrl || null;
-        }
-      }
-      
-      const reviewObj = review.toObject ? review.toObject() : review;
-      const createdAt = (reviewObj as any).createdAt || new Date();
-
-      return {
-        _id: review._id.toString(),
-        id: review._id.toString(),
-        activityId: review.activityId.toString(),
-        activityTitle: activity?.title || 'Unknown Activity',
-        userId: (() => {
-          if (typeof review.userId === 'object' && review.userId !== null && '_id' in review.userId) {
-            return (review.userId as any)._id.toString();
-          } else if (typeof review.userId === 'object' && review.userId !== null) {
-            return String(review.userId);
+    // ✅ Enrichir avec les informations activité
+    const enrichedReviews = await Promise.all(
+      reviews.map(async (review) => {
+        const activityId = typeof review.activityId === 'object' && review.activityId !== null
+          ? (review.activityId as any).toString()
+          : String(review.activityId);
+        
+        // Utiliser l'activité déjà récupérée si disponible, sinon la fetch
+        const activity = coachActivities.get(activityId) || 
+          await this.activitiesService.getActivityById(activityId);
+        
+        let userId: string;
+        if (typeof review.userId === 'object' && review.userId !== null) {
+          if ('_id' in review.userId) {
+            userId = (review.userId as any)._id.toString();
           } else {
-            return review.userId.toString();
+            userId = String(review.userId);
           }
-        })(),
-        userName: userName,
-        userAvatar: userAvatar,
-        rating: review.rating,
-        comment: review.comment || null,
-        createdAt: createdAt,
-      };
-    });
+        } else {
+          userId = String(review.userId);
+        }
+        
+        let userName = 'Unknown User';
+        let userAvatar: string | null = null;
 
-    // Calculer la moyenne
+        if (review.userId && typeof review.userId === 'object' && review.userId !== null) {
+          if ('toObject' in review.userId) {
+            const userObj = (review.userId as any).toObject();
+            userName = userObj?.name || 'Unknown User';
+            userAvatar = userObj?.profileImageUrl || null;
+          } else if ('name' in review.userId) {
+            userName = (review.userId as any).name || 'Unknown User';
+            userAvatar = (review.userId as any).profileImageUrl || null;
+          } else {
+            // Si userId est un ObjectId, fetch l'utilisateur
+            try {
+              const user = await this.usersService.findById(userId);
+              if (user) {
+                userName = user.name || 'Unknown User';
+                userAvatar = user.profileImageUrl || null;
+              }
+            } catch (error) {
+              this.logger.warn(`[getCoachReviews] Could not fetch user details for ID ${userId}: ${error.message}`);
+            }
+          }
+        }
+        
+        const reviewObj = review.toObject ? review.toObject() : review;
+        const createdAt = (reviewObj as any).createdAt || new Date();
+
+        return {
+          _id: review._id.toString(),
+          id: review._id.toString(),
+          activityId: activityId,
+          activityTitle: activity?.title || 'Unknown Activity',
+          userId: userId,
+          userName: userName,
+          userAvatar: userAvatar,
+          rating: review.rating,
+          comment: review.comment || null,
+          createdAt: createdAt,
+        };
+      }),
+    );
+
+    // ✅ Calculer la moyenne
     const totalRating = reviews.reduce((sum, r) => sum + r.rating, 0);
-    const averageRating =
-      reviews.length > 0 ? totalRating / reviews.length : 0;
+    const averageRating = reviews.length > 0 ? totalRating / reviews.length : 0;
 
     this.logger.log(
-      `Returning ${enrichedReviews.length} reviews with average rating ${averageRating} for coach ${coachId}`,
+      `[getCoachReviews] ✅ Returning ${enrichedReviews.length} reviews, ` +
+      `averageRating: ${averageRating.toFixed(1)}, totalReviews: ${reviews.length}`,
     );
 
     return {
       reviews: enrichedReviews,
-      averageRating: Math.round(averageRating * 10) / 10, // Arrondir à 1 décimale
+      averageRating: Math.round(averageRating * 10) / 10,
       totalReviews: reviews.length,
     };
   }
