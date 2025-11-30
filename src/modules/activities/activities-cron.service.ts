@@ -50,52 +50,69 @@ export class ActivitiesCronService {
 
       for (const activity of activities) {
         try {
-          // ✅ Combiner date et time pour obtenir la date/heure complète
+          // ✅ Utiliser directement le champ 'time' qui contient déjà la date complète (ISO 8601)
           let activityDateTime: Date | null = null;
 
-          // Priorité 1: Utiliser le champ 'time' qui contient date + heure
+          // Priorité 1: Utiliser le champ 'time' qui contient date + heure complète
           if (activity.time) {
             activityDateTime = activity.time instanceof Date
               ? activity.time
               : new Date(activity.time);
+            
+            this.logger.debug(
+              `[ActivitiesCronService] Activity ${activity._id} (${activity.title}): time=${activity.time instanceof Date ? activity.time.toISOString() : String(activity.time)}, parsed=${activityDateTime.toISOString()}`,
+            );
           }
           // Priorité 2: Utiliser le champ 'date' et supposer minuit
           else if (activity.date) {
             activityDateTime = activity.date instanceof Date
               ? activity.date
               : new Date(activity.date);
+            
+            this.logger.debug(
+              `[ActivitiesCronService] Activity ${activity._id} (${activity.title}): date=${activity.date instanceof Date ? activity.date.toISOString() : String(activity.date)}, parsed=${activityDateTime.toISOString()}`,
+            );
           }
 
           // Si on n'a ni date ni time, ignorer cette activité
           if (!activityDateTime) {
             this.logger.warn(
-              `[ActivitiesCronService] Activity ${activity._id} has no date/time, skipping`,
+              `[ActivitiesCronService] Activity ${activity._id} (${activity.title}) has no date/time, skipping`,
             );
             continue;
           }
 
           // Vérifier si l'activité est passée
-          if (activityDateTime < now) {
+          const isPast = activityDateTime < now;
+          
+          this.logger.debug(
+            `[ActivitiesCronService] Activity ${activity._id} (${activity.title}): activityDateTime=${activityDateTime.toISOString()}, now=${now.toISOString()}, isPast=${isPast}`,
+          );
+
+          if (isPast) {
             pastActivities.push(activity);
-            this.logger.debug(
-              `[ActivitiesCronService] Activity ${activity._id} (${activity.title}) is past: ${activityDateTime.toISOString()} < ${now.toISOString()}`,
+            this.logger.log(
+              `[ActivitiesCronService] ✅ Activity ${activity._id} (${activity.title}) is past (${activityDateTime.toISOString()}), will be marked as completed`,
             );
           }
         } catch (error) {
           this.logger.error(
             `[ActivitiesCronService] Error checking activity ${activity._id}: ${error.message}`,
+            error.stack,
           );
           continue;
         }
       }
 
       if (pastActivities.length === 0) {
-        this.logger.debug('[ActivitiesCronService] No past activities found');
+        this.logger.debug(
+          `[ActivitiesCronService] No past activities found (checked ${activities.length} activities)`,
+        );
         return;
       }
 
       this.logger.log(
-        `[ActivitiesCronService] Found ${pastActivities.length} past activities to complete`,
+        `[ActivitiesCronService] Found ${pastActivities.length} past activities to complete (out of ${activities.length} checked)`,
       );
 
       for (const activity of pastActivities) {
