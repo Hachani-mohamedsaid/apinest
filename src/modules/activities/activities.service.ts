@@ -890,11 +890,63 @@ export class ActivitiesService {
     this.validateObjectId(creatorId);
     this.logger.log(`[getActivitiesByCreator] Getting activities for creator: ${creatorId}`);
     
+    // ✅ Convertir creatorId en ObjectId
+    const creatorObjectId = new Types.ObjectId(creatorId);
+    
+    // ✅ Chercher avec $or pour gérer les deux formats :
+    // 1. creator est un ObjectId direct
+    // 2. creator est un objet avec _id (après populate)
     const activities = await this.activityModel
-      .find({ creator: new Types.ObjectId(creatorId) })
+      .find({
+        $or: [
+          { creator: creatorObjectId },
+          { 'creator._id': creatorObjectId },
+        ],
+      })
+      .populate('creator', 'name profileImageUrl')
+      .sort({ createdAt: -1 })
       .exec();
     
     this.logger.log(`[getActivitiesByCreator] Found ${activities.length} activities for creator ${creatorId}`);
+    
+    // Log des premières activités pour debug
+    if (activities.length > 0) {
+      activities.slice(0, 3).forEach((activity) => {
+        const creatorInfo =
+          typeof activity.creator === 'object' && activity.creator !== null
+            ? (activity.creator as any)._id?.toString() ||
+              activity.creator.toString()
+            : activity.creator?.toString() || 'unknown';
+        this.logger.debug(
+          `[getActivitiesByCreator] Activity ${activity._id}: title=${activity.title}, creator=${creatorInfo}, isCompleted=${activity.isCompleted}, price=${activity.price || 0}`,
+        );
+      });
+    } else {
+      this.logger.warn(
+        `[getActivitiesByCreator] ⚠️ No activities found for creator ${creatorId}. Checking MongoDB directly...`,
+      );
+      // Vérifier directement dans MongoDB sans populate
+      const directCheck = await this.activityModel
+        .find({
+          $or: [
+            { creator: creatorObjectId },
+            { 'creator._id': creatorObjectId },
+          ],
+        })
+        .select('_id title creator isCompleted price')
+        .limit(5)
+        .lean()
+        .exec();
+      this.logger.log(
+        `[getActivitiesByCreator] Direct MongoDB check found ${directCheck.length} activities`,
+      );
+      directCheck.forEach((activity: any) => {
+        this.logger.debug(
+          `[getActivitiesByCreator] Direct check - Activity ${activity._id}: title=${activity.title}, creator type=${typeof activity.creator}, isCompleted=${activity.isCompleted}`,
+        );
+      });
+    }
+    
     return activities;
   }
 
