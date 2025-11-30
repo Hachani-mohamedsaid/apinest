@@ -612,35 +612,153 @@ export class ActivitiesService {
 
   async getParticipantsDetails(activityId: string) {
     this.validateObjectId(activityId);
+    this.logger.debug(`[getParticipantsDetails] Getting participants for activity: ${activityId}`);
     
+    // ✅ Récupérer l'activité avec populate pour obtenir les informations complètes des participants
     const activity = await this.activityModel
       .findById(activityId)
-      .populate('participantIds', 'name profileImageUrl')
-      .populate('creator', 'name profileImageUrl')
+      .populate({
+        path: 'participantIds',
+        select: 'name profileImageUrl _id', // ✅ Sélectionner les champs nécessaires
+        model: 'User',
+      })
+      .populate({
+        path: 'creator',
+        select: 'name profileImageUrl _id',
+        model: 'User',
+      })
       .exec();
 
     if (!activity) {
+      this.logger.warn(`[getParticipantsDetails] Activity ${activityId} not found`);
       throw new NotFoundException('Activity not found');
     }
 
-    const creatorId = activity.creator?.toString();
+    // ✅ Extraire le creator ID (gérer différents formats)
+    let creatorId: string;
+    if (typeof activity.creator === 'object' && activity.creator !== null) {
+      creatorId = activity.creator._id ? activity.creator._id.toString() : activity.creator.toString();
+    } else {
+      creatorId = activity.creator?.toString() || '';
+    }
+
     if (!creatorId) {
+      this.logger.warn(`[getParticipantsDetails] Activity creator not found for activity ${activityId}`);
       throw new NotFoundException('Activity creator not found');
     }
 
-    // Filtrer les participants null/undefined et vérifier qu'ils ont un _id
-    const validParticipants = activity.participantIds.filter(
-      (participant: any) => participant && participant._id,
-    );
+    if (!activity.participantIds || activity.participantIds.length === 0) {
+      this.logger.debug(`[getParticipantsDetails] No participants found for activity ${activityId}`);
+      return { participants: [] };
+    }
 
-    const participants = validParticipants.map((participant: any) => ({
-      _id: participant._id,
-      name: participant.name,
-      profileImageUrl: participant.profileImageUrl,
-      isHost: participant._id.toString() === creatorId,
-      joinedAt: (activity as any).createdAt || new Date(), // Utiliser createdAt comme approximation
-    }));
+    // ✅ Convertir les participants peuplés en DTO
+    const participants: any[] = [];
+    
+    // Filtrer les participants null/undefined
+    const validParticipants = activity.participantIds.filter((p: any) => p != null);
+    
+    for (const participant of validParticipants) {
+      // Vérifier que le participant est bien peuplé (populated)
+      if (participant && participant._id) {
+        // ✅ Extraire le nom - gérer les cas où participant est un objet User ou un ObjectId
+        let participantName: string | null = null;
+        let participantAvatar: string | null = null;
+        let participantId: string;
 
+        const participantObj = participant as any;
+        if (typeof participant === 'object' && participantObj.name !== undefined) {
+          // Participant est peuplé (objet User)
+          participantName = participantObj.name || null;
+          participantAvatar = participantObj.profileImageUrl || null;
+          participantId = participantObj._id.toString();
+        } else if (typeof participant === 'object' && participant._id) {
+          // Participant a un _id mais pas de name (peut-être pas peuplé correctement)
+          participantId = participant._id.toString();
+          this.logger.warn(`[getParticipantsDetails] Participant ${participantId} is not fully populated, fetching user details...`);
+          
+          // Fallback : fetch l'utilisateur directement
+          try {
+            const user = await this.userModel.findById(participantId).select('name profileImageUrl').exec();
+            if (user) {
+              participantName = user.name || null;
+              participantAvatar = user.profileImageUrl || null;
+            }
+          } catch (error) {
+            this.logger.error(`[getParticipantsDetails] Error fetching user ${participantId}: ${error.message}`);
+          }
+        } else {
+          // Participant n'est pas peuplé (ObjectId) - ne devrait pas arriver avec populate
+          participantId = participant.toString();
+          this.logger.warn(`[getParticipantsDetails] Participant ${participantId} is not populated, fetching user details...`);
+          
+          // Fallback : fetch l'utilisateur directement
+          try {
+            const user = await this.userModel.findById(participantId).select('name profileImageUrl').exec();
+            if (user) {
+              participantName = user.name || null;
+              participantAvatar = user.profileImageUrl || null;
+            }
+          } catch (error) {
+            this.logger.error(`[getParticipantsDetails] Error fetching user ${participantId}: ${error.message}`);
+          }
+        }
+
+        participants.push({
+          _id: participantId,
+          id: participantId,
+          name: participantName, // ✅ Retourner le nom (peut être null si l'utilisateur n'a pas de nom)
+          profileImageUrl: participantAvatar,
+          isHost: participantId === creatorId,
+          joinedAt: (activity as any).createdAt || new Date(), // Utiliser createdAt comme approximation
+        });
+
+        this.logger.debug(
+          `[getParticipantsDetails] Participant ${participantId}: name=${participantName || 'null'}, avatar=${participantAvatar || 'null'}, isHost=${participantId === creatorId}`,
+        );
+      }
+    }
+
+    // ✅ Inclure le créateur dans les participants (s'il n'est pas déjà présent)
+    const isCreatorInParticipants = participants.some((p) => p.id === creatorId);
+    if (!isCreatorInParticipants) {
+      let creatorName: string | null = null;
+      let creatorAvatar: string | null = null;
+
+      if (typeof activity.creator === 'object' && activity.creator !== null) {
+        const creatorObj = activity.creator as any;
+        if (creatorObj.name !== undefined) {
+          creatorName = creatorObj.name || null;
+          creatorAvatar = creatorObj.profileImageUrl || null;
+        } else {
+          // Fallback : fetch le créateur directement
+          try {
+            const creatorUser = await this.userModel.findById(creatorId).select('name profileImageUrl').exec();
+            if (creatorUser) {
+              creatorName = creatorUser.name || null;
+              creatorAvatar = creatorUser.profileImageUrl || null;
+            }
+          } catch (error) {
+            this.logger.error(`[getParticipantsDetails] Error fetching creator ${creatorId}: ${error.message}`);
+          }
+        }
+      }
+
+      participants.unshift({
+        _id: creatorId,
+        id: creatorId,
+        name: creatorName,
+        profileImageUrl: creatorAvatar,
+        isHost: true,
+        joinedAt: (activity as any).createdAt || new Date(),
+      });
+
+      this.logger.debug(
+        `[getParticipantsDetails] Creator ${creatorId}: name=${creatorName || 'null'}, avatar=${creatorAvatar || 'null'}`,
+      );
+    }
+
+    this.logger.log(`[getParticipantsDetails] Returning ${participants.length} participants for activity ${activityId}`);
     return { participants };
   }
 
