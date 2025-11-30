@@ -215,14 +215,23 @@ export class ReviewsService {
           ? (activity.creator as any)._id?.toString() || activity.creator.toString()
           : activity.creator.toString();
         this.logger.debug(
-          `[getCoachReviews] Activity ${activity._id.toString()}: title=${activity.title}, creator=${creatorId}, isCompleted=${activity.isCompleted}, price=${activity.price}`,
+          `[getCoachReviews] Activity ${activity._id.toString()}: title=${activity.title}, creator=${creatorId}, isCompleted=${activity.isCompleted}, price=${activity.price || 0}`,
         );
       });
     }
 
-    if (coachActivities.length === 0) {
+    // ✅ Filtrer seulement les activités complétées avec prix > 0 (coach activities)
+    const completedCoachActivities = coachActivities.filter(
+      (activity) => activity.isCompleted === true && activity.price && activity.price > 0,
+    );
+    
+    this.logger.log(
+      `[getCoachReviews] Found ${completedCoachActivities.length} completed coach activities (with price > 0) out of ${coachActivities.length} total activities`,
+    );
+
+    if (completedCoachActivities.length === 0) {
       this.logger.warn(
-        `[getCoachReviews] No activities found for coach ${coachId}, returning empty reviews`,
+        `[getCoachReviews] No completed coach activities (with price > 0) found for coach ${coachId}, returning empty reviews`,
       );
       
       // Debug: Vérifier s'il y a des reviews dans la base
@@ -268,7 +277,8 @@ export class ReviewsService {
       };
     }
 
-    const activityIds = coachActivities.map((a) => a._id.toString());
+    // ✅ Utiliser seulement les activités complétées avec prix > 0
+    const activityIds = completedCoachActivities.map((a) => a._id.toString());
     this.logger.log(
       `[getCoachReviews] Looking for reviews for ${activityIds.length} activities: ${activityIds.join(', ')}`,
     );
@@ -280,9 +290,9 @@ export class ReviewsService {
       `[getCoachReviews] Found ${reviews.length} reviews for coach ${coachId}`,
     );
 
-    // Créer un map pour accéder rapidement aux activités
+    // Créer un map pour accéder rapidement aux activités (seulement les complétées)
     const activitiesMap = new Map();
-    coachActivities.forEach((activity) => {
+    completedCoachActivities.forEach((activity) => {
       activitiesMap.set(activity._id.toString(), activity);
     });
 
