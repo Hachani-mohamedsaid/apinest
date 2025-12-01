@@ -16,6 +16,7 @@ import { CoachVerificationModule } from './modules/coach-verification/coach-veri
 import { FilesModule } from './modules/files/files.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
+import { SubscriptionModule } from './modules/subscription/subscription.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -57,6 +58,7 @@ import { HealthController } from './health.controller';
     FilesModule,
     PaymentsModule,
     ReviewsModule,
+    SubscriptionModule,
   ],
   controllers: [HealthController],
 })

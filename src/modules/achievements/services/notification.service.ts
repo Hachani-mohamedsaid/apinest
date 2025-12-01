@@ -130,6 +130,7 @@ export class NotificationService {
     page: number = 1,
     limit: number = 20,
     unreadOnly: boolean = false,
+    types?: NotificationType[],
   ): Promise<{
     notifications: NotificationDocument[];
     total: number;
@@ -140,6 +141,9 @@ export class NotificationService {
     const query: any = { userId: new Types.ObjectId(userId) };
     if (unreadOnly) {
       query.isRead = false;
+    }
+    if (types && types.length > 0) {
+      query.type = { $in: types };
     }
 
     const skip = (page - 1) * limit;
@@ -162,6 +166,20 @@ export class NotificationService {
       page,
       totalPages: Math.ceil(total / limit),
     };
+  }
+
+  /**
+   * Alias for getUserNotifications for backward compatibility
+   */
+  async getNotifications(
+    userId: string,
+    page: number = 1,
+    limit: number = 20,
+    unreadOnly: boolean = false,
+    types?: NotificationType[],
+  ): Promise<NotificationDocument[]> {
+    const result = await this.getUserNotifications(userId, page, limit, unreadOnly, types);
+    return result.notifications;
   }
 
   /**

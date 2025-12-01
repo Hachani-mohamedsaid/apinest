@@ -24,6 +24,7 @@ import { SendMessageDto } from './dto/send-message.dto';
 import { ActivityGroupChatResponseDto } from './dto/activity-group-chat-response.dto';
 import { CompleteActivityDto } from './dto/complete-activity.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { SubscriptionLimitGuard } from '../subscription/subscription.guard';
 
 @ApiTags('activities')
 @Controller('activities')
@@ -35,12 +36,13 @@ export class ActivitiesController {
   ) {}
 
   @Post()
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard, SubscriptionLimitGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Create a new activity' })
   @ApiResponse({ status: 201, description: 'Activity created successfully' })
   @ApiResponse({ status: 400, description: 'Invalid input data' })
   @ApiResponse({ status: 401, description: 'Unauthorized' })
+  @ApiResponse({ status: 403, description: 'Activity limit reached' })
   async create(@Body() createActivityDto: CreateActivityDto, @Request() req) {
     const userId = req.user._id.toString();
     return this.activitiesService.create(createActivityDto, userId);

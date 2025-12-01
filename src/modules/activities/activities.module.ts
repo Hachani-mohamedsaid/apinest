@@ -15,6 +15,7 @@ import { User, UserSchema } from '../users/schemas/user.schema';
 import { UsersModule } from '../users/users.module';
 import { ChatsModule } from '../chats/chats.module';
 import { AchievementsModule } from '../achievements/achievements.module';
+import { SubscriptionModule } from '../subscription/subscription.module';
 
 @Module({
   imports: [
@@ -35,6 +36,7 @@ import { AchievementsModule } from '../achievements/achievements.module';
     UsersModule,
     ChatsModule,
     AchievementsModule,
+    SubscriptionModule,
   ],
   controllers: [ActivitiesController],
   providers: [

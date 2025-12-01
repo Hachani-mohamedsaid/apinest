@@ -20,6 +20,7 @@ import { NotificationType } from '../achievements/schemas/notification.schema';
 import { ActivityLog, ActivityLogDocument } from '../achievements/schemas/activity-log.schema';
 import { Match, MatchDocument } from '../quick-match/schemas/match.schema';
 import { User, UserDocument } from '../users/schemas/user.schema';
+import { SubscriptionService } from '../subscription/subscription.service';
 
 @Injectable()
 export class ActivitiesService {
@@ -35,6 +36,7 @@ export class ActivitiesService {
     private readonly badgeService: BadgeService,
     private readonly challengeService: ChallengeService,
     private readonly notificationService: NotificationService,
+    private readonly subscriptionService: SubscriptionService,
   ) {}
 
   /**
@@ -80,6 +82,20 @@ export class ActivitiesService {
         `[ActivitiesService] 💰 Creating paid session with price: ${createActivityDto.price} by verified coach ${userId}`,
       );
     }
+
+    // ✅ NOUVEAU : Vérifier la limite de subscription avant de créer l'activité
+    const limitCheck = await this.subscriptionService.checkActivityLimit(userId);
+    
+    if (!limitCheck.canCreate) {
+      this.logger.warn(
+        `[ActivitiesService] ❌ Activity creation blocked for user ${userId}: ${limitCheck.message}`,
+      );
+      throw new ForbiddenException(limitCheck.message || 'Activity limit reached');
+    }
+
+    this.logger.log(
+      `[ActivitiesService] ✅ Subscription limit check passed for user ${userId}. Activities remaining: ${limitCheck.activitiesRemaining === -1 ? 'unlimited' : limitCheck.activitiesRemaining}`,
+    );
     
     // Combine date and time into a single datetime
     const activityDateTime = this.combineDateAndTime(createActivityDto.date, createActivityDto.time);
@@ -99,6 +115,20 @@ export class ActivitiesService {
     this.logger.log(
       `[ActivitiesService] ✅ Activity created successfully: id=${savedActivity._id}, title="${savedActivity.title}"`,
     );
+
+    // ✅ NOUVEAU : Incrémenter le compteur d'activités après création
+    try {
+      await this.subscriptionService.incrementActivityCount(userId);
+      this.logger.log(
+        `[ActivitiesService] ✅ Activity count incremented for user ${userId}`,
+      );
+    } catch (error) {
+      this.logger.error(
+        `[ActivitiesService] ❌ Error incrementing activity count: ${error.message}`,
+        error.stack,
+      );
+      // Ne pas bloquer la création si l'incrémentation échoue
+    }
 
     // Award XP for hosting event
     await this.xpService.addXp(userId, XpService.XP_REWARDS.HOST_EVENT, 'host_event');

@@ -12,6 +12,11 @@ export enum NotificationType {
   LIKE_RECEIVED = 'like_received',
   MATCH_MADE = 'match_made',
   ACTIVITY_REVIEW_REQUEST = 'activity_review_request',
+  // Subscription notifications
+  SUBSCRIPTION_LIMIT_WARNING = 'subscription_limit_warning',
+  SUBSCRIPTION_RENEWAL_REMINDER = 'subscription_renewal_reminder',
+  SUBSCRIPTION_PAYMENT_SUCCESS = 'subscription_payment_success',
+  SUBSCRIPTION_PAYMENT_FAILED = 'subscription_payment_failed',
 }
 
 @Schema({ timestamps: true })
