@@ -6,7 +6,7 @@ export type SubscriptionDocument = Subscription & Document;
 export enum SubscriptionType {
   FREE = 'free',                    // Coach vérifié : 1 activité gratuite
   PREMIUM_NORMAL = 'premium_normal', // 5 activités/mois
-  PREMIUM_GOLD = 'premium_gold',     // Illimité + avantages
+  PREMIUM_GOLD = 'premium_gold',     // 10 activités/mois + avantages
   PREMIUM_PLATINUM = 'premium_platinum' // Illimité + tous avantages
 }
 

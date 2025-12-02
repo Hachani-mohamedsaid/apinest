@@ -290,7 +290,7 @@ export class SubscriptionService {
         activitiesRemaining: 0,
         subscriptionType: subscription.type,
         freeActivitiesRemaining: 0,
-        message: `Limite mensuelle atteinte (${limit}/${limit} activités). Passez à Premium Gold pour un accès illimité.`,
+        message: `Limite mensuelle atteinte (${limit}/${limit} activités). Passez à Premium Gold (10 activités) ou Platinum (illimité) pour créer plus d'activités.`,
       };
     }
 
@@ -361,6 +361,7 @@ export class SubscriptionService {
       case SubscriptionType.PREMIUM_NORMAL:
         return 5; // 5 activités par mois
       case SubscriptionType.PREMIUM_GOLD:
+        return 10; // 10 activités par mois
       case SubscriptionType.PREMIUM_PLATINUM:
         return -1; // Illimité
       default:
@@ -413,8 +414,8 @@ export class SubscriptionService {
         };
       case SubscriptionType.PREMIUM_GOLD:
         return {
-          maxActivitiesPerMonth: -1,
-          unlimitedActivities: true,
+          maxActivitiesPerMonth: 10,
+          unlimitedActivities: false,
           prioritySupport: true,
           advancedAnalytics: true,
           customBranding: true,
@@ -479,7 +480,7 @@ export class SubscriptionService {
         price: 19.99,
         currency: 'EUR',
         interval: 'month',
-        activitiesLimit: -1,
+        activitiesLimit: 10,
         features: this.getSubscriptionFeatures(SubscriptionType.PREMIUM_GOLD),
         popular: true,
         stripePriceId: process.env.STRIPE_PRICE_PREMIUM_GOLD || '',
@@ -822,7 +823,11 @@ export class SubscriptionService {
     // Vérifier la limite
     const limit = this.getActivityLimit(subscription.type);
     if (limit > 0 && activities.length >= limit) {
-      insights.push(`You've reached your monthly limit of ${limit} activities. Upgrade to Premium Gold for unlimited activities!`);
+      if (subscription.type === SubscriptionType.PREMIUM_NORMAL) {
+        insights.push(`You've reached your monthly limit of ${limit} activities. Upgrade to Premium Gold (10 activities) or Platinum (unlimited) for more activities!`);
+      } else if (subscription.type === SubscriptionType.PREMIUM_GOLD) {
+        insights.push(`You've reached your monthly limit of ${limit} activities. Upgrade to Premium Platinum for unlimited activities!`);
+      }
     }
 
     return insights;
@@ -844,7 +849,7 @@ export class SubscriptionService {
       sum + ((a.price || 0) * (a.participantIds?.length || 0)), 0);
 
     if (revenue > 500 && subscription.type === SubscriptionType.PREMIUM_NORMAL) {
-      recommendations.push("You're generating good revenue! Consider upgrading to Premium Gold for unlimited activities and higher earnings.");
+      recommendations.push("You're generating good revenue! Consider upgrading to Premium Gold (10 activities) or Platinum (unlimited) for more activities and higher earnings.");
     }
 
     const limit = this.getActivityLimit(subscription.type);
@@ -930,9 +935,9 @@ export class SubscriptionService {
       ];
     } else if (subscription.type === SubscriptionType.PREMIUM_NORMAL && percentage >= 80) {
       recommendedPlan = 'premium_gold';
-      reason = `You've used ${used}/${limit} activities this month. Upgrade for unlimited activities!`;
+      reason = `You've used ${used}/${limit} activities this month. Upgrade to Premium Gold (10 activities) or Platinum (unlimited) for more activities!`;
       upgradeBenefits = [
-        'Unlimited activities',
+        '10 activities per month (Premium Gold) or unlimited (Platinum)',
         'Priority support',
         'Custom branding',
         'Featured listing'

@@ -17,6 +17,7 @@ import { FilesModule } from './modules/files/files.module';
 import { PaymentsModule } from './modules/payments/payments.module';
 import { ReviewsModule } from './modules/reviews/reviews.module';
 import { SubscriptionModule } from './modules/subscription/subscription.module';
+import { WhiteLabelModule } from './modules/white-label/white-label.module';
 import { HealthController } from './health.controller';
 
 @Module({
@@ -59,6 +60,7 @@ import { HealthController } from './health.controller';
     PaymentsModule,
     ReviewsModule,
     SubscriptionModule,
+    WhiteLabelModule,
   ],
   controllers: [HealthController],
 })
