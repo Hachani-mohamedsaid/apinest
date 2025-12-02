@@ -244,7 +244,13 @@ export class StripeService {
       const priceId = this.getPriceIdForSubscriptionType(subscriptionType);
       
       if (!priceId) {
-        throw new Error(`Type de subscription invalide: ${subscriptionType}`);
+        // Vérifier si c'est parce que les variables d'environnement ne sont pas configurées
+        const envVarName = `STRIPE_PRICE_${subscriptionType.toUpperCase().replace('-', '_')}`;
+        throw new Error(
+          `Price ID Stripe not configured for subscription type "${subscriptionType}". ` +
+          `Please set the environment variable ${envVarName} in your .env file or Railway. ` +
+          `You can find the Price ID in your Stripe Dashboard > Products > Pricing.`
+        );
       }
 
       // Récupérer ou créer le client Stripe
@@ -307,13 +313,29 @@ export class StripeService {
    * Retourne le Price ID Stripe selon le type de subscription
    */
   private getPriceIdForSubscriptionType(subscriptionType: string): string | null {
-    const priceIds = {
+    // Si c'est FREE, pas besoin de Price ID
+    if (subscriptionType === 'free') {
+      return null;
+    }
+
+    const priceIds: Record<string, string | undefined> = {
       premium_normal: this.configService.get<string>('STRIPE_PRICE_PREMIUM_NORMAL'),
       premium_gold: this.configService.get<string>('STRIPE_PRICE_PREMIUM_GOLD'),
       premium_platinum: this.configService.get<string>('STRIPE_PRICE_PREMIUM_PLATINUM'),
     };
 
-    return priceIds[subscriptionType] || null;
+    const priceId = priceIds[subscriptionType];
+
+    // Si le Price ID n'est pas configuré, logger un avertissement
+    if (!priceId) {
+      this.logger.warn(
+        `⚠️ STRIPE_PRICE_${subscriptionType.toUpperCase().replace('-', '_')} is not configured in environment variables. ` +
+        `Please set this variable in your .env file or Railway environment variables.`
+      );
+      return null;
+    }
+
+    return priceId;
   }
 
   /**
