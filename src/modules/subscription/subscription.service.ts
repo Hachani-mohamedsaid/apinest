@@ -70,6 +70,7 @@ export class SubscriptionService {
     userId: string,
     type: SubscriptionType,
     paymentMethodId?: string,
+    setupIntentId?: string,
   ): Promise<SubscriptionDocument> {
     // Vérifier que l'utilisateur est un coach vérifié pour les subscriptions premium
     const user = await this.usersService.findById(userId);
@@ -81,6 +82,24 @@ export class SubscriptionService {
       throw new BadRequestException('Only verified coaches can subscribe to premium plans');
     }
 
+    // Si setupIntentId est fourni, récupérer le paymentMethodId depuis le SetupIntent
+    let finalPaymentMethodId = paymentMethodId;
+    if (!finalPaymentMethodId && setupIntentId) {
+      try {
+        const setupIntent = await this.stripeService.retrieveSetupIntent(setupIntentId);
+        if (setupIntent.payment_method && typeof setupIntent.payment_method === 'string') {
+          finalPaymentMethodId = setupIntent.payment_method;
+        } else if (setupIntent.payment_method && typeof setupIntent.payment_method === 'object') {
+          finalPaymentMethodId = setupIntent.payment_method.id;
+        }
+        if (!finalPaymentMethodId) {
+          throw new BadRequestException('Payment method not found in SetupIntent');
+        }
+      } catch (error) {
+        throw new BadRequestException(`Error retrieving payment method from SetupIntent: ${error.message}`);
+      }
+    }
+
     // Vérifier si l'utilisateur a déjà une subscription
     let subscription = await this.subscriptionModel.findOne({ userId }).exec();
 
@@ -90,7 +109,7 @@ export class SubscriptionService {
       subscription.status = SubscriptionStatus.ACTIVE;
       
       if (type !== SubscriptionType.FREE) {
-        if (!paymentMethodId) {
+        if (!finalPaymentMethodId) {
           throw new BadRequestException('Payment method ID is required for paid subscriptions');
         }
 
@@ -98,7 +117,7 @@ export class SubscriptionService {
         const stripeSubscription = await this.stripeService.createOrUpdateSubscription(
           userId,
           type,
-          paymentMethodId,
+          finalPaymentMethodId,
           user.email,
           user.name,
         );
@@ -140,14 +159,14 @@ export class SubscriptionService {
 
     // Si c'est une subscription payante, créer la subscription Stripe
     if (type !== SubscriptionType.FREE) {
-      if (!paymentMethodId) {
+      if (!finalPaymentMethodId) {
         throw new BadRequestException('Payment method ID is required for paid subscriptions');
       }
 
       const stripeSubscription = await this.stripeService.createOrUpdateSubscription(
         userId,
         type,
-        paymentMethodId,
+        finalPaymentMethodId,
         user.email,
         user.name,
       );

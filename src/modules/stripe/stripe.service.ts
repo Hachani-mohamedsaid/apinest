@@ -166,6 +166,67 @@ export class StripeService {
   }
 
   /**
+   * Crée un SetupIntent pour collecter une méthode de paiement
+   * @param userId ID de l'utilisateur
+   * @param customerEmail Email du client
+   * @param customerName Nom du client
+   * @param planType Type de plan premium
+   */
+  async createSetupIntent(
+    userId: string,
+    customerEmail: string,
+    customerName: string,
+    planType: string,
+  ): Promise<Stripe.SetupIntent> {
+    if (!this.stripe) {
+      throw new Error('Stripe is not configured. Please set STRIPE_SECRET_KEY in environment variables.');
+    }
+
+    try {
+      // Récupérer ou créer le client Stripe
+      const customer = await this.getOrCreateCustomer(
+        userId,
+        customerEmail,
+        customerName,
+      );
+
+      // Créer le SetupIntent
+      const setupIntent = await this.stripe.setupIntents.create({
+        customer: customer.id,
+        payment_method_types: ['card'],
+        usage: 'off_session', // Pour les paiements récurrents
+        metadata: {
+          userId,
+          planType,
+        },
+      });
+
+      this.logger.log(`SetupIntent created for user ${userId}: ${setupIntent.id}`);
+      return setupIntent;
+    } catch (error) {
+      this.logger.error(`Error creating setup intent: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
+   * Récupère un SetupIntent
+   * @param setupIntentId ID du SetupIntent
+   */
+  async retrieveSetupIntent(setupIntentId: string): Promise<Stripe.SetupIntent> {
+    if (!this.stripe) {
+      throw new Error('Stripe is not configured. Please set STRIPE_SECRET_KEY in environment variables.');
+    }
+
+    try {
+      return await this.stripe.setupIntents.retrieve(setupIntentId);
+    } catch (error) {
+      this.logger.error(`Error retrieving setup intent: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
+  /**
    * Crée ou met à jour une subscription Stripe
    */
   async createOrUpdateSubscription(

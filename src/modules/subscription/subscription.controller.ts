@@ -27,6 +27,10 @@ import { ApplyPromoCodeDto } from './dto/apply-promo-code.dto';
 import { AdminSubscriptionStatsDto } from './dto/admin-stats.dto';
 import { NotificationService } from '../achievements/services/notification.service';
 import { NotificationType } from '../achievements/schemas/notification.schema';
+import { StripeService } from '../stripe/stripe.service';
+import { UsersService } from '../users/users.service';
+import { InitializePaymentDto } from './dto/initialize-payment.dto';
+import { InitializePaymentResponseDto } from './dto/initialize-payment-response.dto';
 
 @Controller('subscriptions')
 @UseGuards(JwtAuthGuard)
@@ -34,6 +38,8 @@ export class SubscriptionController {
   constructor(
     private subscriptionService: SubscriptionService,
     private notificationService: NotificationService,
+    private stripeService: StripeService,
+    private usersService: UsersService,
   ) {}
 
   /**
@@ -79,6 +85,42 @@ export class SubscriptionController {
   }
 
   /**
+   * POST /subscriptions/initialize-payment
+   * Crée un SetupIntent Stripe pour collecter la méthode de paiement
+   */
+  @Post('initialize-payment')
+  async initializePayment(
+    @Request() req,
+    @Body() body: InitializePaymentDto,
+  ): Promise<InitializePaymentResponseDto> {
+    const userId = req.user._id?.toString() || req.user.sub;
+    const { planType } = body;
+
+    // Vérifier que l'utilisateur est un coach vérifié
+    const user = await this.usersService.findById(userId);
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+
+    if (planType !== 'free' && !user.isCoachVerified) {
+      throw new BadRequestException('Only verified coaches can subscribe to premium plans');
+    }
+
+    // Créer le SetupIntent
+    const setupIntent = await this.stripeService.createSetupIntent(
+      userId,
+      user.email,
+      user.name || user.email,
+      planType,
+    );
+
+    return {
+      clientSecret: setupIntent.client_secret!,
+      setupIntentId: setupIntent.id,
+    };
+  }
+
+  /**
    * POST /subscriptions
    * Crée ou met à jour une subscription
    */
@@ -88,14 +130,19 @@ export class SubscriptionController {
     @Body() createSubscriptionDto: CreateSubscriptionDto,
   ): Promise<SubscriptionResponseDto> {
     const userId = req.user._id?.toString() || req.user.sub;
-    if (createSubscriptionDto.type !== 'free' && !createSubscriptionDto.paymentMethodId) {
-      throw new BadRequestException('Payment method ID is required for paid subscriptions');
+    
+    // Pour les plans payants, vérifier qu'on a soit paymentMethodId soit setupIntentId
+    if (createSubscriptionDto.type !== 'free') {
+      if (!createSubscriptionDto.paymentMethodId && !createSubscriptionDto.setupIntentId) {
+        throw new BadRequestException('Payment method ID or SetupIntent ID is required for paid subscriptions');
+      }
     }
 
     await this.subscriptionService.createOrUpdateSubscription(
       userId,
       createSubscriptionDto.type,
       createSubscriptionDto.paymentMethodId,
+      createSubscriptionDto.setupIntentId,
     );
 
     return this.subscriptionService.getSubscriptionResponse(userId);
