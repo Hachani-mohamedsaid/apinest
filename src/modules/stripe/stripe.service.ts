@@ -318,23 +318,36 @@ export class StripeService {
       return null;
     }
 
-    const priceIds: Record<string, string | undefined> = {
-      premium_normal: this.configService.get<string>('STRIPE_PRICE_PREMIUM_NORMAL'),
-      premium_gold: this.configService.get<string>('STRIPE_PRICE_PREMIUM_GOLD'),
-      premium_platinum: this.configService.get<string>('STRIPE_PRICE_PREMIUM_PLATINUM'),
+    // Liste des types de subscription valides
+    const validTypes = ['premium_normal', 'premium_gold', 'premium_platinum'];
+    
+    // Vérifier que le type est valide
+    if (!validTypes.includes(subscriptionType)) {
+      this.logger.error(`Invalid subscription type: ${subscriptionType}. Valid types: ${validTypes.join(', ')}`);
+      return null;
+    }
+
+    // Mapping des types vers les variables d'environnement
+    const envVarMapping: Record<string, string> = {
+      premium_normal: 'STRIPE_PRICE_PREMIUM_NORMAL',
+      premium_gold: 'STRIPE_PRICE_PREMIUM_GOLD',
+      premium_platinum: 'STRIPE_PRICE_PREMIUM_PLATINUM',
     };
 
-    const priceId = priceIds[subscriptionType];
+    const envVarName = envVarMapping[subscriptionType];
+    const priceId = this.configService.get<string>(envVarName);
 
     // Si le Price ID n'est pas configuré, logger un avertissement
     if (!priceId) {
-      this.logger.warn(
-        `⚠️ STRIPE_PRICE_${subscriptionType.toUpperCase().replace('-', '_')} is not configured in environment variables. ` +
-        `Please set this variable in your .env file or Railway environment variables.`
+      this.logger.error(
+        `⚠️ ${envVarName} is not configured in environment variables. ` +
+        `Please set this variable in your .env file or Railway environment variables. ` +
+        `You can find the Price ID in your Stripe Dashboard > Products > Pricing.`
       );
       return null;
     }
 
+    this.logger.log(`✅ Price ID found for ${subscriptionType}: ${priceId.substring(0, 15)}...`);
     return priceId;
   }
 
