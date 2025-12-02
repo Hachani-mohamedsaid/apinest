@@ -111,7 +111,18 @@ export class StripeController {
 
     if (subscription) {
       subscription.status = SubscriptionStatus.ACTIVE;
-      subscription.nextBillingDate = new Date(invoice.period_end * 1000);
+      
+      // Mettre à jour la date de facturation suivante
+      if (invoice.period_end && typeof invoice.period_end === 'number') {
+        subscription.nextBillingDate = new Date(invoice.period_end * 1000);
+      } else {
+        // Fallback: calculer 30 jours à partir de maintenant
+        const fallbackDate = new Date();
+        fallbackDate.setDate(fallbackDate.getDate() + 30);
+        subscription.nextBillingDate = fallbackDate;
+        this.logger.warn(`period_end not found in invoice, using fallback: ${fallbackDate.toISOString()}`);
+      }
+      
       await subscription.save();
 
       // Envoyer notification

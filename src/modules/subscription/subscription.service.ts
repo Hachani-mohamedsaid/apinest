@@ -144,7 +144,20 @@ export class SubscriptionService {
         
         subscription.stripeSubscriptionId = stripeSubscription.id;
         subscription.stripeCustomerId = stripeSubscription.customer as string;
-        subscription.nextBillingDate = new Date((stripeSubscription as any).current_period_end * 1000);
+        
+        // Extraire la date de facturation suivante de la subscription Stripe
+        const currentPeriodEnd = (stripeSubscription as any).current_period_end;
+        if (currentPeriodEnd && typeof currentPeriodEnd === 'number') {
+          subscription.nextBillingDate = new Date(currentPeriodEnd * 1000);
+          this.logger.log(`Next billing date set from Stripe: ${subscription.nextBillingDate.toISOString()}`);
+        } else {
+          // Fallback: calculer 30 jours à partir de maintenant
+          const fallbackDate = new Date();
+          fallbackDate.setDate(fallbackDate.getDate() + 30);
+          subscription.nextBillingDate = fallbackDate;
+          this.logger.warn(`current_period_end not found in Stripe subscription, using fallback: ${fallbackDate.toISOString()}`);
+        }
+        
         subscription.monthlyPrice = this.getMonthlyPrice(type);
         subscription.currency = 'EUR';
       } else {
@@ -193,7 +206,20 @@ export class SubscriptionService {
       
       subscription.stripeSubscriptionId = stripeSubscription.id;
       subscription.stripeCustomerId = stripeSubscription.customer as string;
-      subscription.nextBillingDate = new Date((stripeSubscription as any).current_period_end * 1000);
+      
+      // Extraire la date de facturation suivante de la subscription Stripe
+      const currentPeriodEnd = (stripeSubscription as any).current_period_end;
+      if (currentPeriodEnd && typeof currentPeriodEnd === 'number') {
+        subscription.nextBillingDate = new Date(currentPeriodEnd * 1000);
+        this.logger.log(`Next billing date set from Stripe: ${subscription.nextBillingDate.toISOString()}`);
+      } else {
+        // Fallback: calculer 30 jours à partir de maintenant
+        const fallbackDate = new Date();
+        fallbackDate.setDate(fallbackDate.getDate() + 30);
+        subscription.nextBillingDate = fallbackDate;
+        this.logger.warn(`current_period_end not found in Stripe subscription, using fallback: ${fallbackDate.toISOString()}`);
+      }
+      
       subscription.status = SubscriptionStatus.ACTIVE;
     }
 
