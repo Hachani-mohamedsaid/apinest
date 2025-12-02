@@ -86,16 +86,36 @@ export class SubscriptionService {
     let finalPaymentMethodId = paymentMethodId;
     if (!finalPaymentMethodId && setupIntentId) {
       try {
+        this.logger.log(`Retrieving SetupIntent: ${setupIntentId}`);
         const setupIntent = await this.stripeService.retrieveSetupIntent(setupIntentId);
+        
+        this.logger.log(`SetupIntent status: ${setupIntent.status}, payment_method: ${setupIntent.payment_method}`);
+        
+        // Vérifier que le SetupIntent est bien complété
+        if (setupIntent.status !== 'succeeded') {
+          throw new BadRequestException(
+            `SetupIntent not completed. Status: ${setupIntent.status}. ` +
+            `Please ensure the payment method was successfully collected.`
+          );
+        }
+        
         if (setupIntent.payment_method && typeof setupIntent.payment_method === 'string') {
           finalPaymentMethodId = setupIntent.payment_method;
+          this.logger.log(`Payment method ID retrieved from SetupIntent: ${finalPaymentMethodId}`);
         } else if (setupIntent.payment_method && typeof setupIntent.payment_method === 'object') {
-          finalPaymentMethodId = setupIntent.payment_method.id;
+          finalPaymentMethodId = (setupIntent.payment_method as any).id;
+          this.logger.log(`Payment method ID retrieved from SetupIntent object: ${finalPaymentMethodId}`);
         }
+        
         if (!finalPaymentMethodId) {
-          throw new BadRequestException('Payment method not found in SetupIntent');
+          this.logger.error(`Payment method not found in SetupIntent. SetupIntent data: ${JSON.stringify(setupIntent)}`);
+          throw new BadRequestException(
+            'Payment method not found in SetupIntent. ' +
+            'Please ensure the payment method was successfully collected in the PaymentSheet.'
+          );
         }
       } catch (error) {
+        this.logger.error(`Error retrieving payment method from SetupIntent: ${error.message}`, error.stack);
         throw new BadRequestException(`Error retrieving payment method from SetupIntent: ${error.message}`);
       }
     }

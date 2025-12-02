@@ -131,21 +131,37 @@ export class SubscriptionController {
   ): Promise<SubscriptionResponseDto> {
     const userId = req.user._id?.toString() || req.user.sub;
     
-    // Pour les plans payants, vérifier qu'on a soit paymentMethodId soit setupIntentId
-    if (createSubscriptionDto.type !== 'free') {
-      if (!createSubscriptionDto.paymentMethodId && !createSubscriptionDto.setupIntentId) {
-        throw new BadRequestException('Payment method ID or SetupIntent ID is required for paid subscriptions');
+    try {
+      // Pour les plans payants, vérifier qu'on a soit paymentMethodId soit setupIntentId
+      if (createSubscriptionDto.type !== 'free') {
+        if (!createSubscriptionDto.paymentMethodId && !createSubscriptionDto.setupIntentId) {
+          throw new BadRequestException('Payment method ID or SetupIntent ID is required for paid subscriptions');
+        }
       }
+
+      console.log(`[SubscriptionController] Creating subscription for user ${userId}, type: ${createSubscriptionDto.type}, setupIntentId: ${createSubscriptionDto.setupIntentId}, paymentMethodId: ${createSubscriptionDto.paymentMethodId}`);
+
+      await this.subscriptionService.createOrUpdateSubscription(
+        userId,
+        createSubscriptionDto.type,
+        createSubscriptionDto.paymentMethodId,
+        createSubscriptionDto.setupIntentId,
+      );
+
+      console.log(`[SubscriptionController] Subscription created successfully for user ${userId}`);
+
+      return this.subscriptionService.getSubscriptionResponse(userId);
+    } catch (error) {
+      console.error(`[SubscriptionController] Error creating subscription for user ${userId}:`, error);
+      console.error(`[SubscriptionController] Error details:`, {
+        message: error.message,
+        stack: error.stack,
+        type: createSubscriptionDto.type,
+        setupIntentId: createSubscriptionDto.setupIntentId,
+        paymentMethodId: createSubscriptionDto.paymentMethodId,
+      });
+      throw error;
     }
-
-    await this.subscriptionService.createOrUpdateSubscription(
-      userId,
-      createSubscriptionDto.type,
-      createSubscriptionDto.paymentMethodId,
-      createSubscriptionDto.setupIntentId,
-    );
-
-    return this.subscriptionService.getSubscriptionResponse(userId);
   }
 
   /**

@@ -219,9 +219,13 @@ export class StripeService {
     }
 
     try {
-      return await this.stripe.setupIntents.retrieve(setupIntentId);
+      const setupIntent = await this.stripe.setupIntents.retrieve(setupIntentId, {
+        expand: ['payment_method'], // Expander le payment_method pour avoir plus de détails
+      });
+      this.logger.log(`SetupIntent retrieved: ${setupIntentId}, status: ${setupIntent.status}, payment_method: ${setupIntent.payment_method}`);
+      return setupIntent;
     } catch (error) {
-      this.logger.error(`Error retrieving setup intent: ${error.message}`, error.stack);
+      this.logger.error(`Error retrieving setup intent ${setupIntentId}: ${error.message}`, error.stack);
       throw error;
     }
   }
