@@ -290,7 +290,7 @@ export class StripeService {
       });
 
       this.logger.log(`Subscription created for user ${userId}: ${subscription.id}`);
-      this.logger.log(`Subscription details: current_period_end=${subscription.current_period_end}, current_period_start=${subscription.current_period_start}, status=${subscription.status}`);
+      this.logger.log(`Subscription details: current_period_end=${(subscription as any).current_period_end}, current_period_start=${(subscription as any).current_period_start}, status=${subscription.status}`);
       return subscription;
     } catch (error) {
       this.logger.error(`Error creating subscription: ${error.message}`, error.stack);
