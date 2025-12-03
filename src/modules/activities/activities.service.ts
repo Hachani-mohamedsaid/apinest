@@ -70,8 +70,12 @@ export class ActivitiesService {
       throw new UnauthorizedException('User not found');
     }
 
-    // ✅ NOUVEAU : Vérifier que si un prix est fourni, l'utilisateur doit être un coach vérifié
-    if (createActivityDto.price !== undefined && createActivityDto.price !== null) {
+    // ✅ MODIFICATION : Vérifier si c'est une session (price > 0)
+    const price = createActivityDto.price;
+    const isSession = price !== undefined && price !== null && price > 0;
+
+    // ✅ Vérifier que si un prix est fourni, l'utilisateur doit être un coach vérifié
+    if (isSession) {
       if (!user.isCoachVerified) {
         throw new BadRequestException('Only verified coaches can create paid sessions');
       }
@@ -81,21 +85,26 @@ export class ActivitiesService {
       this.logger.log(
         `[ActivitiesService] 💰 Creating paid session with price: ${createActivityDto.price} by verified coach ${userId}`,
       );
-    }
 
-    // ✅ NOUVEAU : Vérifier la limite de subscription avant de créer l'activité
-    const limitCheck = await this.subscriptionService.checkActivityLimit(userId);
-    
-    if (!limitCheck.canCreate) {
-      this.logger.warn(
-        `[ActivitiesService] ❌ Activity creation blocked for user ${userId}: ${limitCheck.message}`,
+      // ✅ Vérifier la limite de subscription UNIQUEMENT pour les sessions
+      const limitCheck = await this.subscriptionService.checkActivityLimit(userId);
+      
+      if (!limitCheck.canCreate) {
+        this.logger.warn(
+          `[ActivitiesService] ❌ Session creation blocked for user ${userId}: ${limitCheck.message}`,
+        );
+        throw new ForbiddenException(limitCheck.message || 'Session limit reached');
+      }
+
+      this.logger.log(
+        `[ActivitiesService] ✅ Session limit check passed for user ${userId}. Activities remaining: ${limitCheck.activitiesRemaining === -1 ? 'unlimited' : limitCheck.activitiesRemaining}`,
       );
-      throw new ForbiddenException(limitCheck.message || 'Activity limit reached');
+    } else {
+      // ✅ Activité normale : Pas de vérification de limite
+      this.logger.log(
+        `[ActivitiesService] ✅ Creating normal activity (no price) for user ${userId} - No limit check needed`,
+      );
     }
-
-    this.logger.log(
-      `[ActivitiesService] ✅ Subscription limit check passed for user ${userId}. Activities remaining: ${limitCheck.activitiesRemaining === -1 ? 'unlimited' : limitCheck.activitiesRemaining}`,
-    );
     
     // Combine date and time into a single datetime
     const activityDateTime = this.combineDateAndTime(createActivityDto.date, createActivityDto.time);
@@ -116,11 +125,8 @@ export class ActivitiesService {
       `[ActivitiesService] ✅ Activity created successfully: id=${savedActivity._id}, title="${savedActivity.title}"`,
     );
 
-    // ✅ MODIFICATION : Vérifier si c'est une session (price > 0)
-    const price = createActivityDto.price;
-    const isSession = price != null && price > 0;
-
     // ✅ MODIFICATION : Incrémenter le compteur SEULEMENT pour les sessions
+    // (price et isSession sont déjà définis plus haut)
     if (isSession) {
       try {
         await this.subscriptionService.incrementActivityCount(userId);
