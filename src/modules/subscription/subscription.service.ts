@@ -269,6 +269,20 @@ export class SubscriptionService {
       };
     }
 
+    // Pour le plan FREE, si aucune activité gratuite restante et aucune activité mensuelle utilisée,
+    // l'utilisateur ne peut plus créer d'activité (il a déjà utilisé son activité gratuite)
+    if (subscription.type === SubscriptionType.FREE && subscription.freeActivitiesRemaining === 0) {
+      return {
+        canCreate: false,
+        activitiesUsed: used,
+        activitiesLimit: limit,
+        activitiesRemaining: 0,
+        subscriptionType: subscription.type,
+        freeActivitiesRemaining: 0,
+        message: `Vous avez utilisé votre activité gratuite. Passez à Premium pour créer plus d'activités.`,
+      };
+    }
+
     // Vérifier la limite mensuelle
     if (limit === -1) {
       // Illimité
@@ -289,7 +303,7 @@ export class SubscriptionService {
         activitiesLimit: limit,
         activitiesRemaining: 0,
         subscriptionType: subscription.type,
-        freeActivitiesRemaining: 0,
+        freeActivitiesRemaining: subscription.freeActivitiesRemaining || 0,
         message: `Limite mensuelle atteinte (${limit}/${limit} activités). Passez à Premium Gold (10 activités) ou Platinum (illimité) pour créer plus d'activités.`,
       };
     }
@@ -300,7 +314,7 @@ export class SubscriptionService {
       activitiesLimit: limit,
       activitiesRemaining: Math.max(0, limit - used),
       subscriptionType: subscription.type,
-      freeActivitiesRemaining: subscription.freeActivitiesRemaining,
+      freeActivitiesRemaining: subscription.freeActivitiesRemaining || 0,
     };
   }
 
