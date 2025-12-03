@@ -23,12 +23,28 @@ export class SubscriptionLimitGuard implements CanActivate {
       throw new UnauthorizedException('User not authenticated');
     }
 
+    const userId = user._id?.toString() || user.id || user.userId || user.sub;
+
     // ✅ MODIFICATION PRINCIPALE : Vérifier le prix
+    // Si body n'existe pas → Autoriser (le body sera vérifié plus tard dans le service)
+    if (!body) {
+      this.logger.warn(
+        `⚠️ Guard: Body not available yet, allowing (will be checked in service) for user ${userId}`,
+      );
+      return true; // Autoriser si body n'existe pas (sécurité par défaut)
+    }
+
+    // Log pour debug : vérifier le contenu du body
+    this.logger.log(
+      `🔍 Guard check - Body exists: ${!!body}, Body keys: ${body ? Object.keys(body).join(', ') : 'none'}, Price: ${body?.price}`,
+    );
+
+    // Si body n'existe pas ou price n'est pas défini → Activité normale
     const price = body?.price;
 
     // Si price est null, undefined, ou 0 → Activité normale (toujours autorisée)
-    if (price == null || price === 0 || price === '0') {
-      const userId = user._id?.toString() || user.id || user.userId || user.sub;
+    // Vérifier explicitement undefined, null, et 0
+    if (price === undefined || price === null || price === 0 || price === '0' || price === '') {
       this.logger.log(
         `✅ Normal activity (price=${price}) - Always allowed for user ${userId}`,
       );
