@@ -116,18 +116,27 @@ export class ActivitiesService {
       `[ActivitiesService] ✅ Activity created successfully: id=${savedActivity._id}, title="${savedActivity.title}"`,
     );
 
-    // ✅ NOUVEAU : Incrémenter le compteur d'activités après création
-    try {
-      await this.subscriptionService.incrementActivityCount(userId);
+    // ✅ INCRÉMENTER LE COMPTEUR SEULEMENT POUR LES SESSIONS (avec prix)
+    // Les activités normales (price == null ou price === 0) ne sont pas comptabilisées
+    const isSession = createActivityDto.price != null && createActivityDto.price > 0;
+    
+    if (isSession) {
+      try {
+        await this.subscriptionService.incrementActivityCount(userId);
+        this.logger.log(
+          `[ActivitiesService] ✅ Session count incremented for user ${userId} (price: ${createActivityDto.price})`,
+        );
+      } catch (error) {
+        this.logger.error(
+          `[ActivitiesService] ❌ Error incrementing session count: ${error.message}`,
+          error.stack,
+        );
+        // Ne pas bloquer la création si l'incrémentation échoue
+      }
+    } else {
       this.logger.log(
-        `[ActivitiesService] ✅ Activity count incremented for user ${userId}`,
+        `[ActivitiesService] ℹ️ Activity is free (no price), no count increment needed`,
       );
-    } catch (error) {
-      this.logger.error(
-        `[ActivitiesService] ❌ Error incrementing activity count: ${error.message}`,
-        error.stack,
-      );
-      // Ne pas bloquer la création si l'incrémentation échoue
     }
 
     // Award XP for hosting event

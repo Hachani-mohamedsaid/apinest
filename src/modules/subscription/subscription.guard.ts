@@ -18,10 +18,24 @@ export class SubscriptionLimitGuard implements CanActivate {
       throw new ForbiddenException('User not authenticated');
     }
 
+    // ✅ DIFFÉRENCIER : Activité normale vs Session
+    // Récupérer le body de la requête pour vérifier le prix
+    const body = request.body;
+    const price = body?.price;
+
+    // Si price est null, undefined ou 0 → Activité normale (gratuite, pas de limite)
+    // Les activités normales sont toujours autorisées
+    if (price == null || price === 0) {
+      // Activité normale : Toujours autorisée, pas de vérification de limite
+      return true;
+    }
+
+    // Si price > 0 → Session payante (avec limite)
+    // Vérifier les limites seulement pour les sessions
     const limitCheck = await this.subscriptionService.checkActivityLimit(userId);
 
     if (!limitCheck.canCreate) {
-      throw new ForbiddenException(limitCheck.message || 'Activity limit reached');
+      throw new ForbiddenException(limitCheck.message || 'Session limit reached');
     }
 
     // Ajouter les infos de limit dans la request pour utilisation ultérieure
