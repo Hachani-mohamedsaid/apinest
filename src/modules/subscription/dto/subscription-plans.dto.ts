@@ -11,6 +11,7 @@ export class SubscriptionPlanDto {
   features: SubscriptionFeaturesDto;
   popular?: boolean;
   stripePriceId: string;
+  description: string;
 }
 
 export class SubscriptionPlansResponseDto {

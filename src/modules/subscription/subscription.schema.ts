@@ -71,7 +71,7 @@ export class Subscription {
   @Prop({ type: Number, default: 0 })
   monthlyPrice: number; // Prix mensuel en EUR
 
-  @Prop({ type: String })
+  @Prop({ type: String, default: 'EUR' })
   currency: string; // EUR, USD, etc.
 }
 

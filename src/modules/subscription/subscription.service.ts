@@ -460,6 +460,7 @@ export class SubscriptionService {
         activitiesLimit: 1,
         features: this.getSubscriptionFeatures(SubscriptionType.FREE),
         stripePriceId: '',
+        description: '1 activité gratuite pour coach vérifié',
       },
       {
         id: 'premium-normal',
@@ -472,6 +473,7 @@ export class SubscriptionService {
         features: this.getSubscriptionFeatures(SubscriptionType.PREMIUM_NORMAL),
         popular: false,
         stripePriceId: process.env.STRIPE_PRICE_PREMIUM_NORMAL || '',
+        description: '5 activités par mois avec analytics',
       },
       {
         id: 'premium-gold',
@@ -484,6 +486,7 @@ export class SubscriptionService {
         features: this.getSubscriptionFeatures(SubscriptionType.PREMIUM_GOLD),
         popular: true,
         stripePriceId: process.env.STRIPE_PRICE_PREMIUM_GOLD || '',
+        description: '10 activités par mois avec support prioritaire',
       },
       {
         id: 'premium-platinum',
@@ -496,6 +499,7 @@ export class SubscriptionService {
         features: this.getSubscriptionFeatures(SubscriptionType.PREMIUM_PLATINUM),
         popular: false,
         stripePriceId: process.env.STRIPE_PRICE_PREMIUM_PLATINUM || '',
+        description: 'Activités illimitées avec tous les avantages',
       },
     ];
   }
