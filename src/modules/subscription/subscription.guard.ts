@@ -2,6 +2,7 @@ import {
   Injectable,
   CanActivate,
   ExecutionContext,
+  UnauthorizedException,
   ForbiddenException,
   Logger,
 } from '@nestjs/common';
@@ -15,49 +16,61 @@ export class SubscriptionLimitGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const userId = request.user?._id?.toString() || request.user?.sub;
+    const user = request.user;
+    const body = request.body;
 
-    if (!userId) {
-      throw new ForbiddenException('User not authenticated');
+    if (!user) {
+      throw new UnauthorizedException('User not authenticated');
     }
 
-    // ✅ DIFFÉRENCIER : Activité normale vs Session
-    // Récupérer le body de la requête pour vérifier le prix
-    const body = request.body;
+    // ✅ MODIFICATION PRINCIPALE : Vérifier le prix
     const price = body?.price;
 
-    // Si price est null, undefined ou 0 → Activité normale (gratuite, pas de limite)
-    // Les activités normales sont toujours autorisées
-    if (price == null || price === 0) {
-      // Activité normale : Toujours autorisée, pas de vérification de limite
+    // Si price est null, undefined, ou 0 → Activité normale (toujours autorisée)
+    if (price == null || price === 0 || price === '0') {
+      const userId = user._id?.toString() || user.id || user.userId || user.sub;
       this.logger.log(
         `✅ Normal activity (price=${price}) - Always allowed for user ${userId}`,
       );
+      return true; // ✅ AUTORISER les activités normales
+    }
+
+    // Si price > 0 → Session payante (vérifier les limites)
+    const priceNumber = typeof price === 'string' ? parseFloat(price) : price;
+    if (priceNumber > 0) {
+      const userId = user._id?.toString() || user.id || user.userId || user.sub;
+      
+      if (!userId) {
+        throw new UnauthorizedException('User ID not found');
+      }
+
+      this.logger.log(
+        `🔒 Session (price=${priceNumber}) - Checking limits for user ${userId}`,
+      );
+
+      // Utiliser checkActivityLimit() qui retourne un objet avec canCreate
+      const limitCheck = await this.subscriptionService.checkActivityLimit(userId);
+
+      if (!limitCheck.canCreate) {
+        this.logger.warn(
+          `❌ Session creation blocked for user ${userId}: ${limitCheck.message}`,
+        );
+        throw new ForbiddenException(
+          limitCheck.message || 'Vous avez utilisé votre activité gratuite. Passez à Premium pour créer plus d\'activités.',
+        );
+      }
+
+      this.logger.log(
+        `✅ Session limits OK for user ${userId} (used: ${limitCheck.activitiesUsed}/${limitCheck.activitiesLimit})`,
+      );
+
+      // Ajouter les infos de limit dans la request pour utilisation ultérieure
+      request.subscriptionLimit = limitCheck;
+
       return true;
     }
 
-    // Si price > 0 → Session payante (avec limite)
-    // Vérifier les limites seulement pour les sessions
-    this.logger.log(
-      `🔍 Session (price=${price}) - Checking limits for user ${userId}`,
-    );
-
-    const limitCheck = await this.subscriptionService.checkActivityLimit(userId);
-
-    if (!limitCheck.canCreate) {
-      this.logger.warn(
-        `❌ Session creation blocked for user ${userId}: ${limitCheck.message}`,
-      );
-      throw new ForbiddenException(limitCheck.message || 'Session limit reached');
-    }
-
-    this.logger.log(
-      `✅ Session limits OK for user ${userId} (used: ${limitCheck.activitiesUsed}/${limitCheck.activitiesLimit})`,
-    );
-
-    // Ajouter les infos de limit dans la request pour utilisation ultérieure
-    request.subscriptionLimit = limitCheck;
-
+    // Par défaut, autoriser (pour éviter de bloquer par erreur)
     return true;
   }
 }

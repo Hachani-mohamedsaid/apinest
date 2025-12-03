@@ -116,26 +116,27 @@ export class ActivitiesService {
       `[ActivitiesService] ✅ Activity created successfully: id=${savedActivity._id}, title="${savedActivity.title}"`,
     );
 
-    // ✅ INCRÉMENTER LE COMPTEUR SEULEMENT POUR LES SESSIONS (avec prix)
-    // Les activités normales (price == null ou price === 0) ne sont pas comptabilisées
-    const isSession = createActivityDto.price != null && createActivityDto.price > 0;
-    
+    // ✅ MODIFICATION : Vérifier si c'est une session (price > 0)
+    const price = createActivityDto.price;
+    const isSession = price != null && price > 0;
+
+    // ✅ MODIFICATION : Incrémenter le compteur SEULEMENT pour les sessions
     if (isSession) {
       try {
         await this.subscriptionService.incrementActivityCount(userId);
         this.logger.log(
-          `[ActivitiesService] ✅ Session count incremented for user ${userId} (price: ${createActivityDto.price})`,
+          `✅ Session created by user ${userId} (price=${price}), count incremented`,
         );
       } catch (error) {
         this.logger.error(
-          `[ActivitiesService] ❌ Error incrementing session count: ${error.message}`,
+          `❌ Error incrementing session count: ${error.message}`,
           error.stack,
         );
         // Ne pas bloquer la création si l'incrémentation échoue
       }
     } else {
       this.logger.log(
-        `[ActivitiesService] ℹ️ Activity is free (no price), no count increment needed`,
+        `✅ Normal activity created by user ${userId} (price=null), no count increment`,
       );
     }
 
