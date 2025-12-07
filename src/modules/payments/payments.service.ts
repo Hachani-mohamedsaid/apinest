@@ -9,8 +9,11 @@ import { Model, Types } from 'mongoose';
 import { StripeService } from '../stripe/stripe.service';
 import { Activity, ActivityDocument } from '../activities/schemas/activity.schema';
 import { Payment, PaymentDocument } from './schemas/payment.schema';
+import { Withdraw, WithdrawDocument } from './schemas/withdraw.schema';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
+import { CreateWithdrawDto } from './dto/withdraw.dto';
+import * as crypto from 'crypto';
 
 @Injectable()
 export class PaymentsService {
@@ -19,6 +22,7 @@ export class PaymentsService {
   constructor(
     @InjectModel(Activity.name) private activityModel: Model<ActivityDocument>,
     @InjectModel(Payment.name) private paymentModel: Model<PaymentDocument>,
+    @InjectModel(Withdraw.name) private withdrawModel: Model<WithdrawDocument>,
     private stripeService: StripeService,
   ) {}
 
@@ -455,6 +459,182 @@ export class PaymentsService {
     return {
       totalEarnings: Math.round(totalEarnings * 100) / 100,
       earnings,
+    };
+  }
+
+  /**
+   * Calculer le solde disponible du coach
+   */
+  async getAvailableBalance(coachId: string): Promise<number> {
+    // Récupérer tous les paiements réussis pour ce coach
+    const payments = await this.paymentModel.find({
+      coachId: new Types.ObjectId(coachId),
+      status: 'succeeded'
+    }).exec();
+
+    // Calculer le total des gains
+    let totalEarnings = 0;
+    for (const payment of payments) {
+      // Convertir de cents en dollars si nécessaire
+      const amount = payment.amount / 100;
+      totalEarnings += amount;
+    }
+
+    // Récupérer tous les retraits déjà effectués (completed ou processing)
+    const completedWithdraws = await this.withdrawModel.find({
+      coachId: new Types.ObjectId(coachId),
+      status: { $in: ['completed', 'processing'] }
+    }).exec();
+
+    let totalWithdrawn = 0;
+    for (const withdraw of completedWithdraws) {
+      totalWithdrawn += withdraw.amount;
+    }
+
+    // Solde disponible = gains totaux - retraits effectués
+    const availableBalance = totalEarnings - totalWithdrawn;
+
+    return Math.max(0, Math.round(availableBalance * 100) / 100); // Arrondir à 2 décimales
+  }
+
+  /**
+   * Créer une demande de retrait
+   */
+  async createWithdraw(dto: CreateWithdrawDto, coachId: string) {
+    this.logger.log(`[DEBUG] Creating withdraw request for coach ${coachId}, amount: ${dto.amount}`);
+
+    // Vérifier le solde disponible
+    const availableBalance = await this.getAvailableBalance(coachId);
+    this.logger.log(`[DEBUG] Available balance: $${availableBalance}`);
+
+    if (dto.amount > availableBalance) {
+      throw new BadRequestException({
+        statusCode: 400,
+        message: 'Insufficient balance',
+        error: 'The requested amount exceeds your available balance',
+        availableBalance: availableBalance
+      });
+    }
+
+    // Vérifier le montant minimum (ex: 10$)
+    const MINIMUM_WITHDRAW = 10.0;
+    if (dto.amount < MINIMUM_WITHDRAW) {
+      throw new BadRequestException({
+        statusCode: 400,
+        message: `Minimum withdrawal amount is $${MINIMUM_WITHDRAW}`,
+        error: 'Bad Request',
+        minimumAmount: MINIMUM_WITHDRAW
+      });
+    }
+
+    // Générer un ID unique pour le retrait
+    const uniqueId = crypto.randomUUID().replace(/-/g, '').substring(0, 8).toUpperCase();
+    const withdrawId = `WDR-${uniqueId}`;
+
+    // Créer le retrait
+    const withdraw = new this.withdrawModel({
+      coachId: new Types.ObjectId(coachId),
+      amount: dto.amount,
+      currency: dto.currency || 'usd',
+      paymentMethod: dto.paymentMethod || 'bank_transfer',
+      bankAccount: dto.bankAccount,
+      status: 'pending',
+      withdrawId: withdrawId,
+    });
+
+    await withdraw.save();
+    this.logger.log(`[DEBUG] Withdraw created: ${withdrawId}, amount: $${dto.amount}`);
+
+    // TODO: Ici, vous pouvez ajouter une logique pour :
+    // 1. Envoyer une notification au coach
+    // 2. Envoyer une notification à l'administrateur
+    // 3. Intégrer avec un service de paiement externe (Stripe Connect, PayPal, etc.)
+
+    const withdrawObj = withdraw.toObject ? withdraw.toObject() : withdraw;
+    const createdAt = (withdrawObj as any).createdAt || new Date();
+
+    return {
+      success: true,
+      message: 'Withdrawal request submitted successfully',
+      withdrawId: withdrawId,
+      amount: dto.amount,
+      status: 'pending',
+      data: {
+        id: withdraw._id.toString(),
+        createdAt: createdAt
+      }
+    };
+  }
+
+  /**
+   * Récupérer l'historique des retraits d'un coach
+   */
+  async getWithdrawHistory(coachId: string, limit: number = 50) {
+    const withdraws = await this.withdrawModel
+      .find({ coachId: new Types.ObjectId(coachId) })
+      .sort({ createdAt: -1 })
+      .limit(limit)
+      .exec();
+
+    return withdraws.map(withdraw => {
+      const withdrawObj = withdraw.toObject ? withdraw.toObject() : withdraw;
+      const obj = withdrawObj as any;
+      
+      return {
+        id: withdraw._id.toString(),
+        withdrawId: withdraw.withdrawId,
+        amount: withdraw.amount,
+        currency: withdraw.currency,
+        status: withdraw.status,
+        paymentMethod: withdraw.paymentMethod,
+        createdAt: obj.createdAt || new Date(),
+        processedAt: withdraw.processedAt,
+        completedAt: withdraw.completedAt,
+        failureReason: withdraw.failureReason
+      };
+    });
+  }
+
+  /**
+   * Mettre à jour le statut d'un retrait (pour l'admin)
+   */
+  async updateWithdrawStatus(
+    withdrawId: string,
+    status: string,
+    transactionId?: string,
+    failureReason?: string
+  ) {
+    const withdraw = await this.withdrawModel.findOne({ withdrawId: withdrawId });
+
+    if (!withdraw) {
+      throw new NotFoundException('Withdraw not found');
+    }
+
+    withdraw.status = status;
+    // updatedAt est géré automatiquement par timestamps: true
+
+    if (status === 'processing') {
+      withdraw.processedAt = new Date();
+    }
+
+    if (status === 'completed') {
+      withdraw.completedAt = new Date();
+      if (transactionId) {
+        withdraw.transactionId = transactionId;
+      }
+    }
+
+    if (status === 'failed' && failureReason) {
+      withdraw.failureReason = failureReason;
+    }
+
+    await withdraw.save();
+
+    return {
+      success: true,
+      message: `Withdraw status updated to ${status}`,
+      withdrawId: withdraw.withdrawId,
+      status: withdraw.status
     };
   }
 }

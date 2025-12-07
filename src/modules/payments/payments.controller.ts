@@ -7,6 +7,7 @@ import {
   UseGuards,
   Request,
   Query,
+  BadRequestException,
 } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiQuery } from '@nestjs/swagger';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -14,6 +15,7 @@ import { PaymentsService } from './payments.service';
 import { ActivitiesService } from '../activities/activities.service';
 import { CreatePaymentIntentDto } from './dto/create-payment-intent.dto';
 import { ConfirmPaymentDto } from './dto/confirm-payment.dto';
+import { CreateWithdrawDto, WithdrawResponseDto } from './dto/withdraw.dto';
 
 @ApiTags('payments')
 @Controller('payments')
@@ -107,6 +109,148 @@ export class PaymentsController {
     
     // Utiliser la méthode du service qui gère déjà tout
     return this.paymentsService.getCoachEarnings(coachId, year, month);
+  }
+
+  /**
+   * POST /payments/coach/withdraw
+   * Demander un retrait des gains
+   */
+  @Post('coach/withdraw')
+  @ApiOperation({
+    summary: 'Request withdrawal of earnings',
+    description: 'Allows coaches to request withdrawal of their accumulated earnings',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Withdrawal request submitted successfully',
+    type: WithdrawResponseDto,
+  })
+  @ApiResponse({ status: 400, description: 'Invalid amount or insufficient balance' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async requestWithdraw(
+    @Request() req,
+    @Body() createWithdrawDto: CreateWithdrawDto
+  ): Promise<WithdrawResponseDto> {
+    const coachId = req.user.sub || req.user._id?.toString();
+    
+    console.log(`[DEBUG] Withdraw request from coach ${coachId}`);
+    console.log(`[DEBUG] Request body:`, JSON.stringify(createWithdrawDto));
+
+    try {
+      const result = await this.paymentsService.createWithdraw(
+        createWithdrawDto,
+        coachId
+      );
+
+      return result;
+    } catch (error) {
+      console.error(`[ERROR] Withdraw request failed:`, error);
+      
+      // Si c'est déjà une exception HTTP, la relancer
+      if (error.status) {
+        throw error;
+      }
+
+      // Sinon, créer une exception générique
+      throw new BadRequestException({
+        statusCode: 400,
+        message: 'Failed to process withdrawal request',
+        error: error.message || 'Unknown error'
+      });
+    }
+  }
+
+  /**
+   * GET /payments/coach/withdraw/balance
+   * Récupérer le solde disponible
+   */
+  @Get('coach/withdraw/balance')
+  @ApiOperation({
+    summary: 'Get available balance for withdrawal',
+    description: 'Returns the available balance that can be withdrawn by the coach',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Available balance retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        availableBalance: { type: 'number', example: 350.0 },
+        currency: { type: 'string', example: 'usd' }
+      }
+    }
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getAvailableBalance(@Request() req) {
+    const coachId = req.user.sub || req.user._id?.toString();
+    
+    const availableBalance = await this.paymentsService.getAvailableBalance(coachId);
+    
+    return {
+      availableBalance: availableBalance,
+      currency: 'usd'
+    };
+  }
+
+  /**
+   * GET /payments/coach/withdraw/history
+   * Récupérer l'historique des retraits
+   */
+  @Get('coach/withdraw/history')
+  @ApiOperation({
+    summary: 'Get withdrawal history',
+    description: 'Returns the withdrawal history for the authenticated coach',
+  })
+  @ApiQuery({
+    name: 'limit',
+    required: false,
+    type: Number,
+    description: 'Maximum number of withdrawals to return (default: 50)',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Withdrawal history retrieved successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        withdraws: {
+          type: 'array',
+          items: {
+            type: 'object',
+            properties: {
+              id: { type: 'string' },
+              withdrawId: { type: 'string' },
+              amount: { type: 'number' },
+              currency: { type: 'string' },
+              status: { type: 'string' },
+              paymentMethod: { type: 'string' },
+              createdAt: { type: 'string' },
+              processedAt: { type: 'string', nullable: true },
+              completedAt: { type: 'string', nullable: true },
+              failureReason: { type: 'string', nullable: true }
+            }
+          }
+        },
+        total: { type: 'number' }
+      }
+    }
+  })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async getWithdrawHistory(
+    @Request() req,
+    @Query('limit') limit?: number
+  ) {
+    const coachId = req.user.sub || req.user._id?.toString();
+    
+    const history = await this.paymentsService.getWithdrawHistory(
+      coachId,
+      limit ? parseInt(limit.toString()) : 50
+    );
+    
+    return {
+      withdraws: history,
+      total: history.length
+    };
   }
 }
 
