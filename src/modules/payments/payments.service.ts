@@ -464,6 +464,9 @@ export class PaymentsService {
 
   /**
    * Calculer le solde disponible du coach
+   * 
+   * Le solde disponible = Total des gains - Tous les retraits actifs (pending, processing, completed)
+   * Les retraits "failed" ne sont PAS déduits car ils n'ont pas été effectués
    */
   async getAvailableBalance(coachId: string): Promise<number> {
     // Récupérer tous les paiements réussis pour ce coach
@@ -480,19 +483,25 @@ export class PaymentsService {
       totalEarnings += amount;
     }
 
-    // Récupérer tous les retraits déjà effectués (completed ou processing)
-    const completedWithdraws = await this.withdrawModel.find({
+    // Récupérer tous les retraits actifs (pending, processing, completed)
+    // ✅ Inclure TOUS les retraits actifs, pas seulement "completed"
+    // ❌ Exclure les retraits "failed" car ils n'ont pas été effectués
+    const activeWithdraws = await this.withdrawModel.find({
       coachId: new Types.ObjectId(coachId),
-      status: { $in: ['completed', 'processing'] }
+      status: { $in: ['pending', 'processing', 'completed'] }
     }).exec();
 
     let totalWithdrawn = 0;
-    for (const withdraw of completedWithdraws) {
+    for (const withdraw of activeWithdraws) {
       totalWithdrawn += withdraw.amount;
     }
 
-    // Solde disponible = gains totaux - retraits effectués
+    // Solde disponible = gains totaux - retraits actifs
     const availableBalance = totalEarnings - totalWithdrawn;
+
+    this.logger.log(
+      `[getAvailableBalance] Coach ${coachId}: Earnings=${totalEarnings}, Withdrawn=${totalWithdrawn}, Available=${availableBalance}`
+    );
 
     return Math.max(0, Math.round(availableBalance * 100) / 100); // Arrondir à 2 décimales
   }
