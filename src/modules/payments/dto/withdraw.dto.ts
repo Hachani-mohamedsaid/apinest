@@ -1,4 +1,4 @@
-import { IsNumber, IsString, IsOptional, Min, Max } from 'class-validator';
+import { IsNumber, IsString, IsOptional, Min, MaxLength } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateWithdrawDto {
@@ -15,7 +15,7 @@ export class CreateWithdrawDto {
   @ApiPropertyOptional({ example: 'bank_transfer', description: 'Payment method (bank_transfer, paypal, etc.)' })
   @IsString()
   @IsOptional()
-  @Max(50)
+  @MaxLength(50, { message: 'paymentMethod must not be greater than 50 characters' })
   paymentMethod?: string;
 
   @ApiPropertyOptional({ example: 'usd', description: 'Currency (usd, eur, etc.)' })
