@@ -35,7 +35,10 @@ export class StravaService {
     athlete: { id: number };
   }> {
     if (!this.stravaClientId || !this.stravaClientSecret) {
-      throw new BadRequestException('Strava OAuth not configured on server');
+      this.logger.error('❌ Strava OAuth not configured. Please set STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET environment variables on Railway.');
+      throw new BadRequestException(
+        'Strava OAuth not configured on server. Please configure STRAVA_CLIENT_ID and STRAVA_CLIENT_SECRET environment variables.',
+      );
     }
 
     try {
