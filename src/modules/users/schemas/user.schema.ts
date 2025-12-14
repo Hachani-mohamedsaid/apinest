@@ -102,6 +102,19 @@ export class User {
 
   @Prop({ default: 0 })
   followingCount?: number;
+
+  // Strava Integration Fields
+  @Prop()
+  stravaAccessToken?: string;
+
+  @Prop()
+  stravaRefreshToken?: string;
+
+  @Prop()
+  stravaExpiresAt?: number; // Unix timestamp
+
+  @Prop()
+  stravaUserId?: number; // Strava athlete ID
 }
 
 export const UserSchema = SchemaFactory.createForClass(User);

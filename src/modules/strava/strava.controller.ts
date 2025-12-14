@@ -1,10 +1,14 @@
-import { Controller, Get, Query, Redirect, Logger } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from '@nestjs/swagger';
+import { Controller, Get, Query, Redirect, Logger, Post, Body, UseGuards, Request } from '@nestjs/common';
+import { ApiTags, ApiOperation, ApiQuery, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { StravaService } from './strava.service';
 
 @ApiTags('strava')
 @Controller()
 export class StravaController {
   private readonly logger = new Logger(StravaController.name);
+
+  constructor(private readonly stravaService: StravaService) {}
 
   @Get('strava/callback')
   @ApiOperation({
@@ -69,6 +73,66 @@ export class StravaController {
     // Rediriger vers l'app avec le code d'autorisation
     this.logger.log(`[Strava] Redirecting to app with authorization code`);
     return { url: `nexofitness://strava/callback?code=${code}` };
+  }
+
+  /**
+   * POST /strava/oauth/callback
+   * Échange le code d'autorisation avec Strava et stocke les tokens
+   */
+  @Post('strava/oauth/callback')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: 'Exchange Strava OAuth code for tokens',
+    description: 'Exchanges the authorization code with Strava API and stores tokens for the authenticated user',
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Strava account connected successfully',
+    schema: {
+      type: 'object',
+      properties: {
+        message: { type: 'string', example: 'Strava account connected successfully' },
+      },
+    },
+  })
+  @ApiResponse({ status: 400, description: 'Bad request - Invalid code or error from Strava' })
+  @ApiResponse({ status: 401, description: 'Unauthorized - JWT token required' })
+  async oauthCallback(@Request() req, @Body() body: { code: string }) {
+    const userId = req.user.sub || req.user._id?.toString();
+
+    if (!userId) {
+      throw new Error('User ID not found in request');
+    }
+
+    if (!body.code) {
+      throw new Error('Authorization code is required');
+    }
+
+    this.logger.log(`[Strava] OAuth callback for user ${userId}`);
+
+    try {
+      // Échanger le code contre les tokens
+      const tokenData = await this.stravaService.exchangeCodeForToken(body.code);
+
+      // Stocker les tokens pour l'utilisateur
+      await this.stravaService.storeStravaTokens(
+        userId,
+        tokenData.access_token,
+        tokenData.refresh_token,
+        tokenData.expires_at,
+        tokenData.athlete.id,
+      );
+
+      this.logger.log(`✅ Strava account connected successfully for user ${userId}`);
+
+      return {
+        message: 'Strava account connected successfully',
+      };
+    } catch (error: any) {
+      this.logger.error(`[Strava] Error connecting account for user ${userId}:`, error.message);
+      throw error;
+    }
   }
 }
 

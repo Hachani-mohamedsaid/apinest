@@ -110,8 +110,8 @@ export class AICoachController {
   @ApiQuery({
     name: 'sportPreferences',
     required: false,
-    type: [String],
-    description: 'Array of preferred sports',
+    type: String,
+    description: 'Comma-separated string or array of preferred sports (e.g., "Running, Basketball" or ["Running", "Basketball"])',
   })
   @ApiQuery({
     name: 'maxResults',
@@ -126,8 +126,30 @@ export class AICoachController {
   })
   @ApiResponse({ status: 401, description: 'Unauthorized - JWT token required' })
   async getYouTubeVideos(
-    @Query() query: YouTubeVideosRequestDto,
+    @Query('sportPreferences') sportPreferences?: string | string[],
+    @Query('maxResults') maxResults?: number,
   ): Promise<YouTubeVideosResponseDto> {
+    // Convertir sportPreferences en array si c'est une string
+    let sportPreferencesArray: string[] | undefined;
+
+    if (sportPreferences) {
+      if (typeof sportPreferences === 'string') {
+        // Si c'est une string, la diviser par virgule
+        sportPreferencesArray = sportPreferences
+          .split(',')
+          .map((s) => s.trim())
+          .filter((s) => s.length > 0);
+      } else if (Array.isArray(sportPreferences)) {
+        // Si c'est déjà un array, l'utiliser tel quel
+        sportPreferencesArray = sportPreferences.map((s) => String(s).trim()).filter((s) => s.length > 0);
+      }
+    }
+
+    const query: YouTubeVideosRequestDto = {
+      sportPreferences: sportPreferencesArray,
+      maxResults: maxResults ? Number(maxResults) : undefined,
+    };
+
     return this.aiCoachService.getYouTubeVideos(query);
   }
 }
