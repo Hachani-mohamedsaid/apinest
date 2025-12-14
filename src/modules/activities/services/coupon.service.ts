@@ -96,5 +96,62 @@ export class CouponService {
 
     return !!couponEmail;
   }
+
+  /**
+   * Crée un coupon de test pour un utilisateur (DEV ONLY)
+   */
+  async createTestCoupon(
+    userId: string,
+    userEmail: string,
+    userName: string
+  ): Promise<{ success: boolean; message: string; coupon?: any }> {
+    // Calculer le début de la semaine actuelle (Lundi)
+    const now = new Date();
+    const day = now.getDay();
+    const diff = now.getDate() - day + (day === 0 ? -6 : 1);
+    const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day + (day === 0 ? -6 : 1));
+    weekStart.setHours(0, 0, 0, 0);
+
+    // Vérifier si un coupon existe déjà pour cette semaine
+    const existingCoupon = await this.couponEmailModel.findOne({
+      userId,
+      weekStart: {
+        $gte: weekStart,
+        $lt: new Date(weekStart.getTime() + 7 * 24 * 60 * 60 * 1000)
+      }
+    }).exec();
+
+    if (existingCoupon) {
+      return {
+        success: false,
+        message: 'Un coupon existe déjà pour cette semaine. Supprimez-le d\'abord ou attendez la semaine prochaine.',
+        coupon: existingCoupon
+      };
+    }
+
+    // Créer le coupon de test
+    const coupon = await this.couponEmailModel.create({
+      userId,
+      userEmail,
+      couponCode: 'LEADERBOARD',
+      sentAt: new Date(),
+      weekStart: weekStart,
+      couponUsed: false
+    });
+
+    this.logger.log(`✅ Test coupon created for user ${userId} (${userEmail})`);
+
+    return {
+      success: true,
+      message: `Coupon LEADERBOARD créé avec succès pour ${userName}`,
+      coupon: {
+        id: coupon._id.toString(),
+        userId: coupon.userId,
+        couponCode: coupon.couponCode,
+        weekStart: coupon.weekStart,
+        couponUsed: coupon.couponUsed
+      }
+    };
+  }
 }
 

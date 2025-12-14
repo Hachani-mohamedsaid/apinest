@@ -437,5 +437,29 @@ export class ActivitiesController {
 
     return result;
   }
+
+  /**
+   * POST /activities/create-test-coupon
+   * Crée un coupon de test pour l'utilisateur connecté (DEV ONLY)
+   */
+  @Post('create-test-coupon')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Create a test coupon for the current user (DEV ONLY)' })
+  @ApiResponse({ status: 201, description: 'Test coupon created successfully' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async createTestCoupon(@Request() req) {
+    const userId = req.user._id?.toString() || req.user.sub;
+    const userEmail = req.user.email;
+    const userName = req.user.name || 'Test User';
+
+    const result = await this.couponService.createTestCoupon(
+      userId,
+      userEmail,
+      userName
+    );
+
+    return result;
+  }
 }
 
