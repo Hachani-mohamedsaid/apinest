@@ -7,9 +7,11 @@ import { ActivitiesService } from './activities.service';
 import { ActivitiesCronService } from './activities-cron.service';
 import { ActivityMessagesService } from './activity-messages.service';
 import { ActivityRoomGateway } from './activity-room.gateway';
+import { CouponService } from './services/coupon.service';
 import { Activity, ActivitySchema } from './schemas/activity.schema';
 import { ActivityMessage, ActivityMessageSchema } from './schemas/activity-message.schema';
 import { ActivityLog, ActivityLogSchema } from '../achievements/schemas/activity-log.schema';
+import { LeaderboardCouponEmail, LeaderboardCouponEmailSchema } from '../achievements/schemas/leaderboard-coupon-email.schema';
 import { Match, MatchSchema } from '../quick-match/schemas/match.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { UsersModule } from '../users/users.module';
@@ -23,6 +25,7 @@ import { SubscriptionModule } from '../subscription/subscription.module';
       { name: Activity.name, schema: ActivitySchema },
       { name: ActivityMessage.name, schema: ActivityMessageSchema },
       { name: ActivityLog.name, schema: ActivityLogSchema },
+      { name: LeaderboardCouponEmail.name, schema: LeaderboardCouponEmailSchema },
       { name: Match.name, schema: MatchSchema },
       { name: User.name, schema: UserSchema },
     ]),
@@ -44,6 +47,7 @@ import { SubscriptionModule } from '../subscription/subscription.module';
     ActivitiesCronService,
     ActivityMessagesService,
     ActivityRoomGateway,
+    CouponService,
   ],
   exports: [ActivitiesService],
 })

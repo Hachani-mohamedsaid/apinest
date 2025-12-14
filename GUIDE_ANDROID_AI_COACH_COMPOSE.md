@@ -1169,3 +1169,5 @@ Le mode fallback garantit que l'application fonctionne même si Gemini n'est pas
 
 
 
+
+

@@ -9,6 +9,7 @@ import { StreakService } from './services/streak.service';
 import { BadgeService } from './services/badge.service';
 import { ChallengeService } from './services/challenge.service';
 import { LeaderboardService } from './services/leaderboard.service';
+import { LeaderboardEmailService } from './services/leaderboard-email.service';
 import { NotificationService } from './services/notification.service';
 import { Level, LevelSchema } from './schemas/level.schema';
 import { BadgeDefinition, BadgeDefinitionSchema } from './schemas/badge-definition.schema';
@@ -18,15 +19,18 @@ import { UserChallenge, UserChallengeSchema } from './schemas/user-challenge.sch
 import { ActivityLog, ActivityLogSchema } from './schemas/activity-log.schema';
 import { UserStreak, UserStreakSchema } from './schemas/user-streak.schema';
 import { LeaderboardCache, LeaderboardCacheSchema } from './schemas/leaderboard-cache.schema';
+import { LeaderboardCouponEmail, LeaderboardCouponEmailSchema } from './schemas/leaderboard-coupon-email.schema';
 import { Notification, NotificationSchema } from './schemas/notification.schema';
 import { User, UserSchema } from '../users/schemas/user.schema';
 import { Activity, ActivitySchema } from '../activities/schemas/activity.schema';
 import { UsersModule } from '../users/users.module';
+import { MailModule } from '../mail/mail.module';
 
 @Module({
   imports: [
     ScheduleModule.forRoot(),
     UsersModule,
+    MailModule,
     MongooseModule.forFeature([
       { name: Level.name, schema: LevelSchema },
       { name: BadgeDefinition.name, schema: BadgeDefinitionSchema },
@@ -36,6 +40,7 @@ import { UsersModule } from '../users/users.module';
       { name: ActivityLog.name, schema: ActivityLogSchema },
       { name: UserStreak.name, schema: UserStreakSchema },
       { name: LeaderboardCache.name, schema: LeaderboardCacheSchema },
+      { name: LeaderboardCouponEmail.name, schema: LeaderboardCouponEmailSchema },
       { name: Notification.name, schema: NotificationSchema },
       { name: User.name, schema: UserSchema },
       { name: Activity.name, schema: ActivitySchema }, // Pour compter les activités créées
@@ -50,6 +55,7 @@ import { UsersModule } from '../users/users.module';
     BadgeService,
     ChallengeService,
     LeaderboardService,
+    LeaderboardEmailService,
     NotificationService,
   ],
   // Les services sont déjà disponibles via exports, mais on doit s'assurer que les dépendances circulaires sont gérées
@@ -60,6 +66,7 @@ import { UsersModule } from '../users/users.module';
     BadgeService,
     ChallengeService,
     LeaderboardService,
+    LeaderboardEmailService,
     NotificationService,
   ],
 })

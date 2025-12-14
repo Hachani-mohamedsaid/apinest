@@ -25,6 +25,7 @@ import { ActivityGroupChatResponseDto } from './dto/activity-group-chat-response
 import { CompleteActivityDto } from './dto/complete-activity.dto';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
 import { SubscriptionLimitGuard } from '../subscription/subscription.guard';
+import { CouponService } from './services/coupon.service';
 
 @ApiTags('activities')
 @Controller('activities')
@@ -33,6 +34,7 @@ export class ActivitiesController {
     private readonly activitiesService: ActivitiesService,
     private readonly activityMessagesService: ActivityMessagesService,
     private readonly chatsService: ChatsService,
+    private readonly couponService: CouponService,
   ) {}
 
   @Post()
@@ -399,6 +401,41 @@ export class ActivitiesController {
       },
       message: 'Chat de groupe créé avec succès',
     };
+  }
+
+  /**
+   * POST /activities/validate-coupon
+   * Valide un code coupon
+   */
+  @Post('validate-coupon')
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: 'Validate and apply a coupon code' })
+  @ApiResponse({ status: 200, description: 'Coupon validated successfully' })
+  @ApiResponse({ status: 400, description: 'Invalid coupon code or already used' })
+  @ApiResponse({ status: 401, description: 'Unauthorized' })
+  async validateCoupon(
+    @Request() req,
+    @Body() body: { couponCode: string; activityPrice: number }
+  ) {
+    const userId = req.user._id?.toString() || req.user.sub;
+    const { couponCode, activityPrice } = body;
+
+    if (!couponCode || !activityPrice) {
+      throw new BadRequestException('couponCode and activityPrice are required');
+    }
+
+    if (activityPrice <= 0) {
+      throw new BadRequestException('activityPrice must be greater than 0');
+    }
+
+    const result = await this.couponService.validateAndApplyCoupon(
+      userId,
+      couponCode,
+      activityPrice
+    );
+
+    return result;
   }
 }
 
